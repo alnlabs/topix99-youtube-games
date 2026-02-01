@@ -24,7 +24,7 @@ const FPS = 30;
 
 let visualWheelRotation = 0;
 let ffmpegInstance = null;
-let logoImage = null; // Stored globally to avoid reloading every frame
+let logoImage = null;
 
 /* ---------------- BACKGROUND LOGIC ---------------- */
 const palettes = [
@@ -44,8 +44,11 @@ function drawBackground(ctx) {
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 }
 
-/* ---------------- CREATIVE WINNER UI ---------------- */
+/* ---------------- SAFE WINNER UI ---------------- */
 function drawWinnerUI(ctx, cx, cy, r, s) {
+  // CRITICAL FIX: Guard against undefined winner data
+  if (s.currentNumber === undefined || s.currentNumber === null) return;
+
   const now = Date.now();
   const pulse = Math.sin(now / 150) * 15;
   const rotation = now / 1000;
@@ -54,6 +57,7 @@ function drawWinnerUI(ctx, cx, cy, r, s) {
   ctx.save();
   ctx.translate(cx, cy);
 
+  // Victory Rays
   ctx.save();
   ctx.rotate(rotation);
   ctx.globalAlpha = 0.3;
@@ -68,6 +72,7 @@ function drawWinnerUI(ctx, cx, cy, r, s) {
   }
   ctx.restore();
 
+  // Winner Label
   ctx.fillStyle = "#FF3B30";
   ctx.shadowBlur = 15;
   ctx.shadowColor = "black";
@@ -83,11 +88,12 @@ function drawWinnerUI(ctx, cx, cy, r, s) {
   ctx.textAlign = "center";
   ctx.fillText("LUCKY WINNER", 0, -r - 50 + pulse / 2);
 
+  // SAFE STRING CONVERSION: Prevents 'toString' of undefined
   ctx.fillStyle = "white";
   ctx.font = `bold ${200 + pulse}px 'Orbitron'`;
   ctx.shadowBlur = glow;
   ctx.shadowColor = "#FFD700";
-  ctx.fillText(s.currentNumber.toString(), 0, 70);
+  ctx.fillText(String(s.currentNumber), 0, 70);
   ctx.restore();
 }
 
@@ -96,38 +102,44 @@ function drawWheelAndUI(ctx, s) {
   const cx = 520;
   const cy = 520;
   const r = 290;
-  const values = s.wheelValues || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+  // SAFE DATA: Ensure values is always an array
+  const values = s.wheelValues || [];
   const slices = values.length;
 
-  if (s.status === "spinning") {
-    visualWheelRotation += (s.targetRotation - visualWheelRotation) * 0.05;
-  } else if (s.status === "winner" || s.status === "cooldown") {
-    visualWheelRotation = s.targetRotation;
-  } else {
-    visualWheelRotation += 0.005;
-  }
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(visualWheelRotation - Math.PI / 2);
-  for (let i = 0; i < slices; i++) {
-    const angle = (i * 2 * Math.PI) / slices;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.arc(0, 0, r, angle, angle + (2 * Math.PI) / slices);
-    ctx.fillStyle = i % 2 ? "#FFD700" : "#1A1A1A";
-    ctx.fill();
+  // Only draw wheel if we have slices
+  if (slices > 0) {
+    if (s.status === "spinning") {
+      visualWheelRotation += (s.targetRotation - visualWheelRotation) * 0.05;
+    } else if (s.status === "winner" || s.status === "cooldown") {
+      visualWheelRotation = s.targetRotation;
+    } else {
+      visualWheelRotation += 0.005;
+    }
 
     ctx.save();
-    ctx.rotate(angle + Math.PI / slices);
-    ctx.fillStyle = i % 2 ? "#000" : "#FFF";
-    ctx.font = "bold 34px 'Orbitron'";
-    ctx.textAlign = "right";
-    ctx.fillText(values[i].toString(), r - 40, 12);
+    ctx.translate(cx, cy);
+    ctx.rotate(visualWheelRotation - Math.PI / 2);
+    for (let i = 0; i < slices; i++) {
+      const angle = (i * 2 * Math.PI) / slices;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, r, angle, angle + (2 * Math.PI) / slices);
+      ctx.fillStyle = i % 2 ? "#FFD700" : "#1A1A1A";
+      ctx.fill();
+
+      ctx.save();
+      ctx.rotate(angle + Math.PI / slices);
+      ctx.fillStyle = i % 2 ? "#000" : "#FFF";
+      ctx.font = "bold 34px 'Orbitron'";
+      ctx.textAlign = "right";
+      ctx.fillText(String(values[i]), r - 40, 12);
+      ctx.restore();
+    }
     ctx.restore();
   }
-  ctx.restore();
 
+  // --- POINTER ---
   ctx.fillStyle = "#FF3B30";
   ctx.beginPath();
   ctx.moveTo(cx, cy - r + 5);
@@ -135,26 +147,26 @@ function drawWheelAndUI(ctx, s) {
   ctx.lineTo(cx + 30, cy - r - 45);
   ctx.fill();
 
+  // --- PROGRESS BAR ---
   if (s.status === "waiting" || s.status === "cooldown") {
     const barY = HEIGHT - 100;
-    const remainingMs = Math.max(0, s.timerEnd - Date.now());
+    const remainingMs = Math.max(0, (s.timerEnd || 0) - Date.now());
     ctx.fillStyle = "white";
     ctx.font = "45px 'Bebas'";
     ctx.textAlign = "center";
     ctx.fillText(
-      s.status === "waiting" ? "READY TO SPIN..." : "NEXT ROUND STARTING",
+      s.status === "waiting"
+        ? "READY TO SPIN, KEEP GUESSING..."
+        : "NEXT ROUND STARTING",
       cx,
       barY - 60
     );
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(cx - 250, barY, 500, 20);
     ctx.fillStyle = "#FFD700";
-    ctx.fillRect(
-      cx - 250,
-      barY,
-      500 * (remainingMs / (s.status === "waiting" ? 15000 : 5000)),
-      20
-    );
+    const barWidth =
+      500 * (remainingMs / (s.status === "waiting" ? 15000 : 5000));
+    ctx.fillRect(cx - 250, barY, Math.min(500, Math.max(0, barWidth)), 20);
   }
 
   if (s.status === "winner" || s.status === "cooldown") {
@@ -172,7 +184,7 @@ async function drawLeaderboard(ctx, game) {
   try {
     topPlayers = (await game.getLeaderboard?.()) || [];
   } catch (e) {
-    console.log("LB Error:", e.message);
+    console.warn("LB Fetch fail:", e.message);
   }
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
@@ -192,31 +204,28 @@ async function drawLeaderboard(ctx, game) {
     ctx.font = "24px 'Orbitron'";
     ctx.fillStyle = i === 0 ? "#FFD700" : "white";
     ctx.textAlign = "left";
-    ctx.fillText(
-      `${i === 0 ? "👑 " : i + 1 + ". "}${player.username.substring(0, 14)}`,
-      lbX + 40,
-      rowY
-    );
+    const name = String(player.username || "Anonymous").substring(0, 14);
+    ctx.fillText(`${i === 0 ? "👑 " : i + 1 + ". "}${name}`, lbX + 40, rowY);
     ctx.textAlign = "right";
-    ctx.fillText(player.wins.toString(), lbX + lbWidth - 40, rowY);
+    ctx.fillText(String(player.wins || 0), lbX + lbWidth - 40, rowY);
   });
 }
 
 /* ---------------- STREAM ENGINE ---------------- */
 async function startLive(rtmpUrl, game) {
-  // 1. ASSET LOADING (LOGO)
+  // Pre-load Logo
   try {
     logoImage = await loadImage(
       path.join(__dirname, "../assets/images/logo.png")
     );
-    console.log("✅ Logo loaded");
+    console.log("✅ Logo image ready");
   } catch (e) {
     console.warn("⚠️ Logo not found at assets/images/logo.png");
   }
 
-  // 2. CLEANUP OLD PROCESS
+  // Cleanup old FFmpeg to prevent EINVAL on refresh
   if (ffmpegInstance) {
-    console.log("♻️ Killing old FFmpeg process...");
+    console.log("♻️ Killing old stream process...");
     ffmpegInstance.stdin.destroy();
     ffmpegInstance.kill("SIGKILL");
     ffmpegInstance = null;
@@ -227,7 +236,6 @@ async function startLive(rtmpUrl, game) {
   let isRendering = false;
 
   function spawnFFmpeg() {
-    console.log("🎬 Connecting to Stream...");
     const ff = spawn("ffmpeg", [
       "-loglevel",
       "error",
@@ -271,13 +279,13 @@ async function startLive(rtmpUrl, game) {
     ]);
 
     ff.stdin.on("error", (e) => {
-      if (["EPIPE", "ECONNRESET", "EINVAL"].includes(e.code)) {
-        console.log("⚠️ Pipe closed gracefully.");
+      if (!["EPIPE", "ECONNRESET", "EINVAL"].includes(e.code)) {
+        console.error("FFmpeg Stdin Error:", e);
       }
     });
 
     ff.on("close", (code) => {
-      console.log(`FFmpeg exited: ${code}`);
+      console.log(`FFmpeg closed (${code})`);
       ffmpegInstance = null;
     });
 
@@ -297,18 +305,11 @@ async function startLive(rtmpUrl, game) {
       drawWheelAndUI(ctx, s);
       await drawLeaderboard(ctx, game);
 
-      // --- LOGO DRAWING ---
+      // Draw Logo
       if (logoImage) {
-        // Draw logo in the top-right corner
-        const logoSize = 180;
-        const padding = 50;
-        ctx.drawImage(
-          logoImage,
-          WIDTH - logoSize - padding,
-          padding,
-          logoSize,
-          logoSize
-        );
+        const size = 180;
+        const pad = 50;
+        ctx.drawImage(logoImage, WIDTH - size - pad, pad, size, size);
       }
 
       // Branding
@@ -330,7 +331,7 @@ async function startLive(rtmpUrl, game) {
         }
       }
     } catch (e) {
-      console.log("Frame skip:", e.message);
+      console.error("Render Loop Error:", e.message);
     }
 
     isRendering = false;
