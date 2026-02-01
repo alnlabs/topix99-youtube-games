@@ -1,0 +1,29 @@
+{
+  "name": "topix99-youtube-games",
+  "version": "1.0.0",
+  "description": "Topix99 YouTube Live Broadcast & Game Engine",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "default": "cross-env MODE=default node server.js",
+    "luckywheel": "cross-env MODE=luckywheel node server.js",
+    "dev": "cross-env MODE=default nodemon server.js"
+  },
+  "dependencies": {
+    "canvas": "^3.2.1",
+    "chalk": "^5.6.2",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "playwright-core": "^1.42.1",
+    "redis": "^4.6.7",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
