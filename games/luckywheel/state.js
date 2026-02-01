@@ -3,15 +3,18 @@ const { redisClient } = require("../../utils/redis");
 module.exports = {
   gameState: {
     round: 0,
-    status: "waiting", // waiting | spinning | finished
+    status: "waiting", // waiting | spinning | finished | cooldown
     currentNumber: null,
     winners: [],
-    participants: new Map(), // userId -> { username, guess }
+    participants: new Map(),
+
+    // --- ANIMATION & UI STATE ---
     wheelPosition: 0,
+    targetRotation: 0,
+    timerEnd: 0,
     spinSpeed: 0,
     lastSpinTime: null,
 
-    // Celebration state
     celebration: {
       active: false,
       username: null,
@@ -23,28 +26,35 @@ module.exports = {
   // Save core state to Redis
   // -------------------------------
   async save() {
-    await redisClient.hSet("game:luckwheel", {
-      round: this.gameState.round,
+    // Ensure we are saving clean strings/numbers to Redis
+    const payload = {
+      round: String(this.gameState.round),
       status: this.gameState.status,
-      currentNumber: this.gameState.currentNumber,
-      wheelPosition: this.gameState.wheelPosition,
-      spinSpeed: this.gameState.spinSpeed,
+      currentNumber: String(this.gameState.currentNumber || 0),
+      wheelPosition: String(this.gameState.wheelPosition),
+      targetRotation: String(this.gameState.targetRotation || 0),
+      timerEnd: String(this.gameState.timerEnd || 0),
+      spinSpeed: String(this.gameState.spinSpeed),
       celebration: JSON.stringify(this.gameState.celebration),
-      lastUpdate: Date.now(),
-    });
+      lastUpdate: String(Date.now()),
+    };
+
+    await redisClient.hSet("game:luckwheel", payload);
   },
 
   // -------------------------------
-  // Load state from Redis (for restarts)
+  // Load state from Redis
   // -------------------------------
   async load() {
     const data = await redisClient.hGetAll("game:luckwheel");
-    if (!data || !data.round) return;
+    if (!data || !data.status) return;
 
-    this.gameState.round = parseInt(data.round);
+    this.gameState.round = parseInt(data.round || 0);
     this.gameState.status = data.status;
-    this.gameState.currentNumber = parseInt(data.currentNumber);
+    this.gameState.currentNumber = parseInt(data.currentNumber || 0);
     this.gameState.wheelPosition = parseFloat(data.wheelPosition || 0);
+    this.gameState.targetRotation = parseFloat(data.targetRotation || 0);
+    this.gameState.timerEnd = parseInt(data.timerEnd || 0);
     this.gameState.spinSpeed = parseFloat(data.spinSpeed || 0);
     this.gameState.celebration = data.celebration
       ? JSON.parse(data.celebration)
@@ -52,9 +62,46 @@ module.exports = {
   },
 
   // -------------------------------
-  // Leaderboard (Redis Sorted Set)
+  // Game Logic Actions
   // -------------------------------
+
+  async startSpin(winningNumber) {
+    // 1. Update status and winner
+    this.gameState.status = "spinning";
+    this.gameState.currentNumber = winningNumber;
+
+    // 2. Math: 10 slices, so each slice is 36° or (PI * 2) / 10
+    const sliceAngle = (Math.PI * 2) / 10;
+    const sliceIndex = winningNumber / 10 - 1;
+
+    // 3. Normalize the current position to be within 0 and 2PI
+    // This prevents the rotation value from growing to infinity
+    this.gameState.wheelPosition = this.gameState.wheelPosition % (Math.PI * 2);
+
+    // 4. Calculate target:
+    // We want the wheel to spin 6 times (extraSpins)
+    // and stop precisely at the targetAngle relative to the top pointer
+    const targetAngle = sliceIndex * sliceAngle + sliceAngle / 2;
+    const extraSpins = Math.PI * 2 * 6;
+
+    // We subtract targetAngle because the wheel usually rotates clockwise
+    // against a fixed pointer at the top
+    this.gameState.targetRotation =
+      this.gameState.wheelPosition + extraSpins - targetAngle;
+
+    await this.save();
+
+    // 5. Auto-transition to 'finished' after the animation completes (approx 6-7s)
+    setTimeout(async () => {
+      this.gameState.status = "finished";
+      // Update wheelPosition to the final stopped rotation for the next round
+      this.gameState.wheelPosition = this.gameState.targetRotation;
+      await this.save();
+    }, 7000);
+  },
+
   async addWin(userId, username) {
+    // Standard Redis Sorted Set for leaderboard
     await redisClient.zIncrBy(
       "leaderboard:luckwheel",
       1,
@@ -65,51 +112,43 @@ module.exports = {
   async getTopPlayers(limit = 5) {
     const data = await redisClient.zRangeWithScores(
       "leaderboard:luckwheel",
-      -limit,
-      -1
+      0,
+      limit - 1,
+      { REV: true }
     );
 
-    return data.reverse().map((e) => {
+    return data.map((e) => {
       const [userId, username] = e.value.split("|");
-      return {
-        userId,
-        username,
-        score: e.score,
-      };
+      return { userId, username, score: e.score };
     });
   },
 
-  // -------------------------------
-  // Trigger celebration (used by game logic)
-  // -------------------------------
   async triggerCelebration(username) {
-    this.gameState.celebration.active = true;
-    this.gameState.celebration.username = username;
-    this.gameState.celebration.startTime = Date.now();
+    this.gameState.celebration = {
+      active: true,
+      username: username,
+      startTime: Date.now(),
+    };
     await this.save();
   },
 
-  clearCelebration() {
-    this.gameState.celebration.active = false;
-    this.gameState.celebration.username = null;
-    this.gameState.celebration.startTime = 0;
-  },
-
-  // -------------------------------
-  // Reset everything
-  // -------------------------------
   async reset() {
     await redisClient.del("game:luckwheel");
-    await redisClient.del("leaderboard:luckwheel");
+    // Note: Usually you don't want to delete the leaderboard on every game reset
+    // await redisClient.del("leaderboard:luckwheel");
 
     this.gameState.round = 0;
     this.gameState.status = "waiting";
     this.gameState.currentNumber = null;
-    this.gameState.winners = [];
-    this.gameState.participants.clear();
-    this.gameState.spinSpeed = 0;
     this.gameState.wheelPosition = 0;
+    this.gameState.targetRotation = 0;
+    this.gameState.timerEnd = 0;
+    this.gameState.celebration = {
+      active: false,
+      username: null,
+      startTime: 0,
+    };
 
-    this.clearCelebration();
+    await this.save();
   },
 };
