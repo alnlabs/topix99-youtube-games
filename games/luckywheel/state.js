@@ -5,28 +5,32 @@ module.exports = {
     round: 0,
     status: "waiting", // waiting | spinning | finished | cooldown
     currentNumber: null,
+
+    // --- DYNAMIC WHEEL CONFIG ---
+    // This array defines the slices. Its length determines the number of slices.
+    wheelValues: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+
     winners: [],
     participants: new Map(),
-
-    // --- ANIMATION & UI STATE ---
     wheelPosition: 0,
     targetRotation: 0,
     timerEnd: 0,
     spinSpeed: 0,
-    lastSpinTime: null,
-
-    celebration: {
-      active: false,
-      username: null,
-      startTime: 0,
-    },
+    celebration: { active: false, username: null, startTime: 0 },
   },
 
-  // -------------------------------
-  // Save core state to Redis
-  // -------------------------------
+  cachedLeaderboard: [],
+
+  // Getter for the 30FPS render loop
+  getStateSync() {
+    return this.gameState;
+  },
+
+  getLeaderboardSync() {
+    return this.cachedLeaderboard;
+  },
+
   async save() {
-    // Ensure we are saving clean strings/numbers to Redis
     const payload = {
       round: String(this.gameState.round),
       status: this.gameState.status,
@@ -35,6 +39,8 @@ module.exports = {
       targetRotation: String(this.gameState.targetRotation || 0),
       timerEnd: String(this.gameState.timerEnd || 0),
       spinSpeed: String(this.gameState.spinSpeed),
+      // Save the wheel configuration so the renderer knows what to draw
+      wheelValues: JSON.stringify(this.gameState.wheelValues),
       celebration: JSON.stringify(this.gameState.celebration),
       lastUpdate: String(Date.now()),
     };
@@ -42,85 +48,86 @@ module.exports = {
     await redisClient.hSet("game:luckwheel", payload);
   },
 
-  // -------------------------------
-  // Load state from Redis
-  // -------------------------------
   async load() {
-    const data = await redisClient.hGetAll("game:luckwheel");
-    if (!data || !data.status) return;
+    try {
+      const [data, lbData] = await Promise.all([
+        redisClient.hGetAll("game:luckwheel"),
+        redisClient.zRangeWithScores("leaderboard:luckwheel", 0, 4, {
+          REV: true,
+        }),
+      ]);
 
-    this.gameState.round = parseInt(data.round || 0);
-    this.gameState.status = data.status;
-    this.gameState.currentNumber = parseInt(data.currentNumber || 0);
-    this.gameState.wheelPosition = parseFloat(data.wheelPosition || 0);
-    this.gameState.targetRotation = parseFloat(data.targetRotation || 0);
-    this.gameState.timerEnd = parseInt(data.timerEnd || 0);
-    this.gameState.spinSpeed = parseFloat(data.spinSpeed || 0);
-    this.gameState.celebration = data.celebration
-      ? JSON.parse(data.celebration)
-      : { active: false, username: null, startTime: 0 };
+      if (!data || !data.status) return;
+
+      this.gameState.round = parseInt(data.round || 0);
+      this.gameState.status = data.status;
+      this.gameState.currentNumber = parseInt(data.currentNumber || 0);
+      this.gameState.wheelPosition = parseFloat(data.wheelPosition || 0);
+      this.gameState.targetRotation = parseFloat(data.targetRotation || 0);
+      this.gameState.timerEnd = parseInt(data.timerEnd || 0);
+      this.gameState.spinSpeed = parseFloat(data.spinSpeed || 0);
+
+      // Load dynamic wheel slices
+      if (data.wheelValues) {
+        this.gameState.wheelValues = JSON.parse(data.wheelValues);
+      }
+
+      this.gameState.celebration = data.celebration
+        ? JSON.parse(data.celebration)
+        : { active: false, username: null, startTime: 0 };
+
+      // Update cached leaderboard
+      this.cachedLeaderboard = lbData.map((e) => {
+        const [userId, username] = e.value.split("|");
+        return { username, score: e.score };
+      });
+    } catch (err) {
+      console.error("Redis Load Error:", err);
+    }
   },
 
-  // -------------------------------
-  // Game Logic Actions
-  // -------------------------------
-
   async startSpin(winningNumber) {
-    // 1. Update status and winner
     this.gameState.status = "spinning";
     this.gameState.currentNumber = winningNumber;
 
-    // 2. Math: 10 slices, so each slice is 36° or (PI * 2) / 10
-    const sliceAngle = (Math.PI * 2) / 10;
-    const sliceIndex = winningNumber / 10 - 1;
+    // --- DYNAMIC MATH ---
+    // No longer hardcoded to 10. We use the length of the actual array.
+    const slices = this.gameState.wheelValues.length;
+    const sliceAngle = (Math.PI * 2) / slices;
 
-    // 3. Normalize the current position to be within 0 and 2PI
-    // This prevents the rotation value from growing to infinity
+    // Find where the winning number is located in the dynamic array
+    const sliceIndex = this.gameState.wheelValues.indexOf(winningNumber);
+
+    if (sliceIndex === -1) {
+      console.error(`Error: ${winningNumber} is not on the wheel!`);
+      return;
+    }
+
+    // Normalize current position
     this.gameState.wheelPosition = this.gameState.wheelPosition % (Math.PI * 2);
 
-    // 4. Calculate target:
-    // We want the wheel to spin 6 times (extraSpins)
-    // and stop precisely at the targetAngle relative to the top pointer
+    // Calculate target angle based on dynamic slice index
     const targetAngle = sliceIndex * sliceAngle + sliceAngle / 2;
     const extraSpins = Math.PI * 2 * 6;
 
-    // We subtract targetAngle because the wheel usually rotates clockwise
-    // against a fixed pointer at the top
     this.gameState.targetRotation =
       this.gameState.wheelPosition + extraSpins - targetAngle;
 
     await this.save();
 
-    // 5. Auto-transition to 'finished' after the animation completes (approx 6-7s)
     setTimeout(async () => {
       this.gameState.status = "finished";
-      // Update wheelPosition to the final stopped rotation for the next round
       this.gameState.wheelPosition = this.gameState.targetRotation;
       await this.save();
     }, 7000);
   },
 
   async addWin(userId, username) {
-    // Standard Redis Sorted Set for leaderboard
     await redisClient.zIncrBy(
       "leaderboard:luckwheel",
       1,
       `${userId}|${username}`
     );
-  },
-
-  async getTopPlayers(limit = 5) {
-    const data = await redisClient.zRangeWithScores(
-      "leaderboard:luckwheel",
-      0,
-      limit - 1,
-      { REV: true }
-    );
-
-    return data.map((e) => {
-      const [userId, username] = e.value.split("|");
-      return { userId, username, score: e.score };
-    });
   },
 
   async triggerCelebration(username) {
@@ -133,11 +140,6 @@ module.exports = {
   },
 
   async reset() {
-    await redisClient.del("game:luckwheel");
-    // Note: Usually you don't want to delete the leaderboard on every game reset
-    // await redisClient.del("leaderboard:luckwheel");
-
-    this.gameState.round = 0;
     this.gameState.status = "waiting";
     this.gameState.currentNumber = null;
     this.gameState.wheelPosition = 0;
@@ -148,7 +150,7 @@ module.exports = {
       username: null,
       startTime: 0,
     };
-
+    // We keep wheelValues during reset unless you want a new set of numbers
     await this.save();
   },
 };
