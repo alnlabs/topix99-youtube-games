@@ -1,0 +1,19 @@
+{
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "extends": ["standard"],
+  "parserOptions": {
+    "ecmaVersion": "latest"
+  },
+  "rules": {
+    "no-unused-vars": ["warn"],
+    "no-console": "off",
+    "semi": ["error", "always"],
+    "quotes": ["error", "double"],
+    "space-before-function-paren": ["error", "never"],
+    "comma-dangle": ["error", "never"],
+    "no-trailing-spaces": "error"
+  }
+}

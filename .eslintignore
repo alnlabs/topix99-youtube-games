@@ -1,0 +1,16 @@
+node_modules
+assets
+dist
+build
+coverage
+tmp
+.playwright
+browser-data
+logs
+
+utils/ytchat.js
+
+# Optional: ignore generated videos
+*.mp4
+*.flv
+*.ts

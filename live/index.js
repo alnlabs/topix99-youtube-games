@@ -1,14 +1,11 @@
 const { spawn } = require("child_process");
 const { createCanvas } = require("canvas");
-const path = require("path");
 
 const WIDTH = 1920;
 const HEIGHT = 1080;
 const FPS = 30;
 
-/* --------------------------------------------------
-   🎨 CREATIVE BACKGROUNDS
--------------------------------------------------- */
+// ----------------- BACKGROUNDS -----------------
 
 const palettes = [
   ["#0f2027", "#203a43", "#2c5364"],
@@ -30,9 +27,9 @@ function pickNewBackground() {
 
 function drawBackground(ctx, w, h, phase) {
   const grad = ctx.createLinearGradient(0, 0, w, h);
-  currentPalette.forEach((c, i) => {
-    grad.addColorStop(i / (currentPalette.length - 1), c);
-  });
+  currentPalette.forEach((c, i) =>
+    grad.addColorStop(i / (currentPalette.length - 1), c)
+  );
 
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
@@ -41,16 +38,13 @@ function drawBackground(ctx, w, h, phase) {
     ctx.fillStyle = "rgba(255,215,0,0.12)";
     ctx.fillRect(0, 0, w, h);
   }
-
   if (phase === "finished") {
     ctx.fillStyle = "rgba(0,255,160,0.12)";
     ctx.fillRect(0, 0, w, h);
   }
 }
 
-/* --------------------------------------------------
-   🎡 WHEEL
--------------------------------------------------- */
+// ----------------- DRAWING -----------------
 
 function drawWheel(ctx, s) {
   const cx = 500;
@@ -80,9 +74,7 @@ function drawWheel(ctx, s) {
     ctx.textAlign = "right";
     ctx.fillStyle = "#000";
     ctx.font = "24px Arial Black";
-    const from = i * 10 + 1;
-    const to = (i + 1) * 10;
-    ctx.fillText(`${from}-${to}`, r - 10, 10);
+    ctx.fillText(`${i * 10 + 1}-${(i + 1) * 10}`, r - 10, 10);
     ctx.restore();
   }
 
@@ -96,55 +88,37 @@ function drawWheel(ctx, s) {
   ctx.fill();
 }
 
-/* --------------------------------------------------
-   🏆 LEADERBOARD
--------------------------------------------------- */
-
 async function drawLeaderboard(ctx, game) {
   const list = await game.getLeaderboard();
-
   ctx.fillStyle = "#00ffcc";
   ctx.font = "42px Arial";
   ctx.fillText("TOP PLAYERS", 1300, 200);
 
   list.forEach((p, i) => {
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = "#fff";
     ctx.font = "36px Arial";
     ctx.fillText(`${i + 1}. ${p.username} — ${p.score}`, 1300, 260 + i * 50);
   });
 }
 
-/* --------------------------------------------------
-   🎉 CELEBRATION
--------------------------------------------------- */
-
 function drawCelebration(ctx, s) {
-  const c = s.celebration;
-  const t = (Date.now() - c.startTime) / 1000;
+  const t = (Date.now() - s.celebration.startTime) / 1000;
   if (t > 6) return;
 
-  ctx.fillStyle = `rgba(255,215,0,${0.15 + Math.sin(t * 10) * 0.1})`;
+  ctx.fillStyle = "rgba(255,215,0,0.15)";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  ctx.strokeStyle = "#FFD700";
-  ctx.lineWidth = 12;
-  ctx.beginPath();
-  ctx.arc(960, 540, t * 220, 0, Math.PI * 2);
-  ctx.stroke();
 
   ctx.shadowColor = "#FFD700";
   ctx.shadowBlur = 50;
   ctx.fillStyle = "#FFD700";
   ctx.font = "100px Arial Black";
-  ctx.fillText(c.username, 600, 520);
+  ctx.fillText(s.celebration.username, 600, 520);
   ctx.font = "60px Arial";
   ctx.fillText("IS THE WINNER!", 650, 600);
   ctx.shadowBlur = 0;
 }
 
-/* --------------------------------------------------
-   📺 STREAM PIPELINE
--------------------------------------------------- */
+// ----------------- STREAM -----------------
 
 function startLive(rtmpUrl, game) {
   const canvas = createCanvas(WIDTH, HEIGHT);
@@ -164,7 +138,7 @@ function startLive(rtmpUrl, game) {
     "-f",
     "lavfi",
     "-i",
-    "anullsrc=channel_layout=stereo:sample_rate=44100",
+    "anullsrc",
     "-map",
     "0:v",
     "-map",
@@ -177,16 +151,10 @@ function startLive(rtmpUrl, game) {
     "yuv420p",
     "-b:v",
     "6000k",
-    "-maxrate",
-    "6000k",
-    "-bufsize",
-    "12000k",
     "-g",
     `${FPS * 2}`,
     "-c:a",
     "aac",
-    "-b:a",
-    "128k",
     "-f",
     "flv",
     rtmpUrl,
@@ -211,7 +179,7 @@ function startLive(rtmpUrl, game) {
 
     drawWheel(ctx, s);
 
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = "#fff";
     ctx.font = "48px Arial";
     ctx.fillText(game.getOverlayText(), 400, 850);
 
