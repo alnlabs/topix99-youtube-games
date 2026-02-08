@@ -9,7 +9,20 @@
     "default": "cross-env MODE=default node server.js",
     "luckywheel": "cross-env MODE=luckywheel node server.js",
     "luckywheel:test": "cross-env MODE=luckywheel node test_luckywheel.js",
-    "dev": "cross-env MODE=default nodemon server.js"
+    "dev": "cross-env MODE=default nodemon server.js",
+    "pm2:start": "pm2 start ecosystem.config.js --only topix99-luckywheel",
+    "pm2:start:test": "pm2 start ecosystem.config.js --only topix99-luckywheel-test",
+    "pm2:stop": "pm2 stop topix99-luckywheel",
+    "pm2:stop:test": "pm2 stop topix99-luckywheel-test",
+    "pm2:restart": "pm2 restart topix99-luckywheel",
+    "pm2:restart:test": "pm2 restart topix99-luckywheel-test",
+    "pm2:delete": "pm2 delete topix99-luckywheel",
+    "pm2:delete:test": "pm2 delete topix99-luckywheel-test",
+    "pm2:logs": "pm2 logs topix99-luckywheel",
+    "pm2:logs:test": "pm2 logs topix99-luckywheel-test",
+    "pm2:status": "pm2 status",
+    "pm2:save": "pm2 save",
+    "pm2:startup": "pm2 startup"
   },
   "dependencies": {
     "canvas": "^3.2.1",
