@@ -19,17 +19,28 @@ module.exports.calculateWinners = function (state) {
     (s.wheelPosition % (Math.PI * 2)) -
     sliceOffset;
 
-  // 3. Winner Detection
-  let closest = Infinity;
+  // 3. Winner Detection - Only exact matches win
+  // Check if ANY of the user's guesses match the target
   let winners = [];
 
   for (const [userId, p] of s.participants) {
-    const d = Math.abs(p.guess - target);
-    if (d < closest) {
-      closest = d;
-      winners = [{ userId, ...p, d }];
-    } else if (d === closest) {
-      winners.push({ userId, ...p, d });
+    // Get all guesses (support both new format with guesses array and old format with single guess)
+    const guesses = p.guesses || (p.guess ? [p.guess] : []);
+
+    // Check if any of the user's guesses match the target
+    const hasMatch = guesses.includes(target);
+
+    if (hasMatch) {
+      // User has a winning guess - use the first matching guess (or latest if multiple match)
+      const winningGuess = guesses.find(g => g === target) || guesses[guesses.length - 1];
+      winners.push({
+        userId,
+        username: p.username,
+        guess: winningGuess, // The guess that matched
+        guesses: guesses, // All guesses
+        guessCount: p.guessCount || guesses.length,
+        d: 0
+      });
     }
   }
   s.winners = winners;

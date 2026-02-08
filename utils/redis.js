@@ -56,8 +56,28 @@ async function disconnectRedis() {
   }
 }
 
-module.exports = {
-  redisClient,
-  connectRedis,
-  disconnectRedis,
-};
+// --- MOCK IMPLEMENTATION FOR PROFILING ---
+if (process.env.MOCK_REDIS === "true") {
+  const mockClient = {
+    connect: async () => {},
+    quit: async () => {},
+    isOpen: true,
+    on: () => {},
+    hSet: async () => {},
+    hGetAll: async () => ({ status: "spinning", wheelValues: "[10,20,30,40,50]" }),
+    zRangeWithScores: async () => [],
+    zIncrBy: async () => {},
+  };
+
+  module.exports = {
+    redisClient: mockClient,
+    connectRedis: mockClient.connect,
+    disconnectRedis: mockClient.quit
+  };
+} else {
+  module.exports = {
+    redisClient,
+    connectRedis,
+    disconnectRedis,
+  };
+}

@@ -138,11 +138,30 @@ class YTChat {
         timeout: 60000,
       });
 
-      // Wait for chat to load
-      await this.page.waitForSelector(
+      // Wait for chat to load - try multiple selectors as fallback
+      let chatLoaded = false;
+      const selectors = [
         "yt-live-chat-item-list-renderer #items",
-        { timeout: 60000 }
-      );
+        "yt-live-chat-item-list-renderer",
+        "#items",
+        "yt-live-chat-renderer",
+      ];
+
+      for (const selector of selectors) {
+        try {
+          await this.page.waitForSelector(selector, { timeout: 30000 });
+          chatLoaded = true;
+          console.log(`[ytchat] Chat loaded using selector: ${selector}`);
+          break;
+        } catch (e) {
+          // Try next selector
+          continue;
+        }
+      }
+
+      if (!chatLoaded) {
+        throw new Error("Chat container not found - live chat may not be available for this video");
+      }
 
       // Ensure we're in "Live chat" mode, not "Top chat"
       await this._ensureLiveChatMode(this.page);
@@ -160,10 +179,17 @@ class YTChat {
       this.restartTimer = setTimeout(() => this._restart(), 300000);
     } catch (error) {
       console.error("[ytchat] Error during launch/navigation:", error.message);
-      // Retry sooner if launch failed
+      // Retry sooner if launch failed, but with exponential backoff
       if (!this.isStopping) {
         if (this.restartTimer) clearTimeout(this.restartTimer);
-        this.restartTimer = setTimeout(() => this._restart(), 30000);
+        // Use exponential backoff: 30s, 60s, 120s, max 300s
+        const retryDelay = Math.min(30000 * Math.pow(2, this._retryCount || 0), 300000);
+        this._retryCount = (this._retryCount || 0) + 1;
+        console.log(`[ytchat] Retrying in ${retryDelay / 1000}s (attempt ${this._retryCount})`);
+        this.restartTimer = setTimeout(() => {
+          this._retryCount = 0; // Reset on successful launch
+          this._restart();
+        }, retryDelay);
       }
     }
   }
@@ -349,10 +375,29 @@ class YTChat {
           waitUntil: "domcontentloaded",
           timeout: 60000,
         });
-        await newPage.waitForSelector(
+        // Wait for chat to load - try multiple selectors as fallback
+        let chatLoaded = false;
+        const selectors = [
           "yt-live-chat-item-list-renderer #items",
-          { timeout: 60000 }
-        );
+          "yt-live-chat-item-list-renderer",
+          "#items",
+          "yt-live-chat-renderer",
+        ];
+
+        for (const selector of selectors) {
+          try {
+            await newPage.waitForSelector(selector, { timeout: 30000 });
+            chatLoaded = true;
+            break;
+          } catch (e) {
+            // Try next selector
+            continue;
+          }
+        }
+
+        if (!chatLoaded) {
+          throw new Error("Chat container not found during restart - live chat may not be available");
+        }
 
         // Keep both pages alive briefly for overlap
         await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -377,6 +422,9 @@ class YTChat {
         console.log(
           `[ytchat] Restart complete (${this._messageTracker.size} messages tracked)`
         );
+
+        // Reset retry count on successful restart
+        this._retryCount = 0;
 
         // Schedule next restart
         if (this.restartTimer) clearTimeout(this.restartTimer);

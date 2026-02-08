@@ -8,6 +8,7 @@
     "start": "node server.js",
     "default": "cross-env MODE=default node server.js",
     "luckywheel": "cross-env MODE=luckywheel node server.js",
+    "luckywheel:test": "cross-env MODE=luckywheel node test_luckywheel.js",
     "dev": "cross-env MODE=default nodemon server.js"
   },
   "dependencies": {
