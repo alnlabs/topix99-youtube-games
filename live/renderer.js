@@ -259,6 +259,7 @@ class WheelRotationState {
     this.visualWheelRotation = 0;
     this.lockedWheelRotation = null;
     this.lastRotTime = Date.now();
+    this.lastStatus = null; // Track previous status to detect transitions
   }
 
   /**
@@ -267,23 +268,42 @@ class WheelRotationState {
    * @returns {number} - Render rotation value [0, 2PI]
    */
   update(gameState) {
+    const statusChanged = this.lastStatus !== gameState.status;
+    this.lastStatus = gameState.status;
+
     if (gameState.status === "spinning") {
       // During spinning, animate towards target
       // Clear any locked position when spinning starts
       this.lockedWheelRotation = null;
       const target = gameState.targetRotation || 0;
-      this.visualWheelRotation += (target - this.visualWheelRotation) * 0.1;
+      // Use faster interpolation to reach target more quickly
+      this.visualWheelRotation += (target - this.visualWheelRotation) * 0.15;
+
+      // If we're very close to target (within 0.01 radians), snap to exact target
+      // This ensures the wheel reaches the exact position before status changes to "finished"
+      if (Math.abs(target - this.visualWheelRotation) < 0.01) {
+        this.visualWheelRotation = target;
+      }
     } else if (gameState.status === "finished" || gameState.status === "winner" || gameState.status === "cooldown") {
       // After spinning stops, LOCK the wheel position - prevent state updates from moving it
       // IMPORTANT: Once locked, use the locked position instead of state.targetRotation
-      if (this.lockedWheelRotation === null) {
-        // First time reaching finished state - lock the current target rotation
+
+      // Detect transition from spinning to finished - lock immediately
+      if (statusChanged && (this.lastStatus === "spinning" || this.lockedWheelRotation === null)) {
+        // Status just changed to finished OR we don't have a lock yet
+        // IMMEDIATELY snap to exact target rotation and lock it
         if (gameState.targetRotation !== undefined && gameState.targetRotation !== null) {
           this.lockedWheelRotation = gameState.targetRotation;
-          this.visualWheelRotation = this.lockedWheelRotation;
+          this.visualWheelRotation = this.lockedWheelRotation; // Snap immediately, no lerp
+        } else if (this.visualWheelRotation !== undefined) {
+          // If targetRotation is not available, lock to current visual position
+          this.lockedWheelRotation = this.visualWheelRotation;
         }
-      } else {
-        // Already locked - use locked position, ignore state updates
+      }
+
+      // Always use locked position when in finished/winner/cooldown state
+      if (this.lockedWheelRotation !== null) {
+        // Ensure we stay exactly at locked position (prevent any drift or state updates)
         this.visualWheelRotation = this.lockedWheelRotation;
       }
     } else {
@@ -306,6 +326,7 @@ class WheelRotationState {
    */
   reset() {
     this.lockedWheelRotation = null;
+    this.lastStatus = null;
   }
 }
 
@@ -459,25 +480,31 @@ function drawWheelAndUI(ctx, gameState, rotationState) {
 
   // Draw numbers UPRIGHT (not rotated) for easier reading
   // Calculate positions in world coordinates and draw without rotation
+  // IMPORTANT: Show numbers during waiting (guessing) and spinning phases
+  // Hide numbers when selected number is shown (finished/winner/cooldown)
   ctx.restore(); // Restore from wheel rotation context
   ctx.save(); // Save for number drawing
 
-  for (let i = 0; i < slices; i++) {
-    const sliceAngle = (i * 2 * Math.PI) / slices;
-    const sliceCenterAngle = sliceAngle + Math.PI / slices; // Center of the slice
-    const numberRadius = Math.max(r - 50, r * 0.65); // Safe distance from edge
+  // Show numbers during waiting (guessing phase) and spinning phases
+  // Hide during finished/winner/cooldown (when selected number is displayed)
+  if (gameState.status === "waiting" || gameState.status === "spinning") {
+    for (let i = 0; i < slices; i++) {
+      const sliceAngle = (i * 2 * Math.PI) / slices;
+      const sliceCenterAngle = sliceAngle + Math.PI / slices; // Center of the slice
+      const numberRadius = Math.max(r - 50, r * 0.65); // Safe distance from edge
 
-    // Calculate world position accounting for wheel rotation
-    const rotatedAngle = sliceCenterAngle + renderRotation - Math.PI / 2;
-    const worldX = cx + Math.cos(rotatedAngle) * numberRadius;
-    const worldY = cy + Math.sin(rotatedAngle) * numberRadius;
+      // Calculate world position accounting for wheel rotation
+      const rotatedAngle = sliceCenterAngle + renderRotation - Math.PI / 2;
+      const worldX = cx + Math.cos(rotatedAngle) * numberRadius;
+      const worldY = cy + Math.sin(rotatedAngle) * numberRadius;
 
-    // Draw number upright (no rotation)
-    ctx.fillStyle = i % 2 ? "#000" : "#FFF";
-    ctx.font = "bold 34px 'MouldyCheese'";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(String(values[i]), worldX, worldY);
+      // Draw number upright (no rotation)
+      ctx.fillStyle = i % 2 ? "#000" : "#FFF";
+      ctx.font = "bold 34px 'MouldyCheese'";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(values[i]), worldX, worldY);
+    }
   }
 
   ctx.restore();
@@ -513,10 +540,12 @@ function drawWheelAndUI(ctx, gameState, rotationState) {
     drawProgressBar(ctx, cx, barY, 500, 20, progress, "rgba(0,0,0,0.5)", "#FFD700");
   }
 
-  // Show answer after spin stops
+  // Show answer as soon as currentNumber is set (no delay)
   // Only show celebration if there's a winner, otherwise show normal answer
   // IMPORTANT: Only show answer UI, never zoom or highlight the wheel itself
-  if (gameState.status === "winner" || gameState.status === "cooldown") {
+  // Show immediately when currentNumber is set, regardless of status (except waiting)
+  // This ensures the number appears as soon as it's calculated, even if status is still "spinning"
+  if (gameState.currentNumber !== null && gameState.status !== "waiting") {
     const hasWinner = gameState.winners && gameState.winners.length > 0;
     const celebrationActive = gameState.celebration && gameState.celebration.active;
 
@@ -549,7 +578,7 @@ function drawLeaderboard(ctx, players, animationState = null) {
     animationState.update(sortedPlayers);
   }
   // Increased width and moved further left for more space
-  const lbWidth = 600; // Increased from 460 to 600
+  const lbWidth = 700; // Increased from 600 to 700
   const lbX = WIDTH - lbWidth - 40; // Moved left (reduced right margin from 100 to 40)
   const lbY = 220; // Moved down from 180 to 220 to prevent mobile keyboard cropping
 
@@ -569,10 +598,12 @@ function drawLeaderboard(ctx, players, animationState = null) {
 
   // Score bar dimensions - adjusted for wider leaderboard
   const barHeight = 14; // Increased thickness from 8 to 14
-  const nameEndX = lbX + 240; // End of name area (increased from 200)
+  const nameEndX = lbX + 280; // End of name area (increased from 240 to 280 for 15 char usernames)
   const scoreStartX = lbX + lbWidth - 80; // Start of score number area
   const barSpacing = 30; // Space between name and bar (increased from 20)
-  const barWidth = Math.max(0, scoreStartX - nameEndX - barSpacing); // Reduced width with more spacing
+  // Reduce bar width by using a multiplier (0.7 = 70% of available space)
+  const availableWidth = scoreStartX - nameEndX - barSpacing;
+  const barWidth = Math.max(0, availableWidth * 0.7); // Reduced to 70% of available width
   const rowHeight = 45; // Height between rows
   const baseRowY = lbY + 160; // Base Y position for first row
 
@@ -589,27 +620,31 @@ function drawLeaderboard(ctx, players, animationState = null) {
     ctx.font = "24px 'MouldyCheese'";
     ctx.fillStyle = i === 0 ? "#FFD700" : "white";
     ctx.textAlign = "left";
-    // Truncate username to 10 characters with ellipses
+    // Truncate username to 15 characters with ellipses
     const fullName = String(player.username || "Anonymous");
-    const name = fullName.length > 10 ? fullName.substring(0, 10) + "..." : fullName;
+    const name = fullName.length > 15 ? fullName.substring(0, 15) + "..." : fullName;
     ctx.fillText(`${i === 0 ? "👑 " : i + 1 + ". "}${name}`, lbX + 40, rowY);
 
     // Draw score bar background (subtle gray) - only if barWidth is valid
+    // Right-align the bar: start from the right side (near score number) and extend leftward
     if (barWidth > 0) {
-      const barX = nameEndX + barSpacing; // Use barSpacing for consistent spacing
       const barY = rowY - barHeight / 2; // Center vertically with text
+      // Right-align: bar starts from scoreStartX and extends leftward
+      const barX = scoreStartX - barWidth; // Start from right, extend left
 
-      // Draw background bar
+      // Draw background bar (right-aligned)
       drawRoundedRect(ctx, barX, barY, barWidth, barHeight, 4, "rgba(255, 255, 255, 0.1)");
 
-      // Draw score bar fill (proportional to score)
+      // Draw score bar fill (proportional to score, right-aligned)
       if (barFillWidth > 0) {
         // Use light green for highest scorer, gray for others
         const barColor = i === 0 && score === maxScore
           ? "#66BB6A" // Light green for highest scorer
           : "#9E9E9E"; // Gray for others
 
-        drawRoundedRect(ctx, barX, barY, barFillWidth, barHeight, 4, barColor);
+        // Right-align the fill: start from scoreStartX and extend leftward
+        const fillX = scoreStartX - barFillWidth;
+        drawRoundedRect(ctx, fillX, barY, barFillWidth, barHeight, 4, barColor);
       }
     }
 

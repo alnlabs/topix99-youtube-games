@@ -1,4 +1,5 @@
 const { redisClient } = require("../../utils/redis");
+const C = require("./constants");
 
 // Determine if we're in test mode (test_luckywheel.js) or live mode (server.js)
 // Use different Redis keys to keep test and live data separate
@@ -140,48 +141,45 @@ module.exports = {
     // Commit to this rotation
     this.gameState.wheelPosition = this.gameState.targetRotation;
 
+    // 3. Calculate the winning number IMMEDIATELY (no delay)
+    // This ensures the number is available as soon as the wheel stops visually
+    const finalAngle = this.gameState.targetRotation;
+    const slices = this.gameState.wheelValues.length;
+    const sliceAngle = (Math.PI * 2) / slices;
+
+    // Normalize targetRotation to [0, 2PI] (same as renderer does)
+    let renderRotation = finalAngle % (Math.PI * 2);
+    if (renderRotation < 0) renderRotation += Math.PI * 2;
+
+    // The wheel is rotated by: renderRotation - PI/2
+    // Slice i starts at angle: i * sliceAngle (in wheel's local coordinates)
+    // After rotation, slice i is at: i * sliceAngle + (renderRotation - PI/2) (in global coordinates)
+    // Pointer is at: -PI/2 = 3*PI/2 (in global coordinates)
+    // We need to find which slice contains the pointer position
+
+    // Working backwards: if pointer is at 3*PI/2, and wheel is rotated by (renderRotation - PI/2),
+    // then in wheel's local coordinates, the pointer is at: 3*PI/2 - (renderRotation - PI/2)
+    // = 3*PI/2 - renderRotation + PI/2 = 2*PI - renderRotation
+    let pointerInLocalCoords = (2 * Math.PI - renderRotation) % (Math.PI * 2);
+    if (pointerInLocalCoords < 0) pointerInLocalCoords += Math.PI * 2;
+
+    // Find which slice contains this angle
+    const winningIndex = Math.floor(pointerInLocalCoords / sliceAngle) % slices;
+    const winner = this.gameState.wheelValues[winningIndex];
+
+    // Set the winning number IMMEDIATELY (no delay)
+    this.gameState.currentNumber = winner;
+
+    console.log(`[Physics] Calculated winner immediately: Stopped at ${finalAngle.toFixed(3)}. RenderRot=${renderRotation.toFixed(3)}. PointerLocal=${pointerInLocalCoords.toFixed(3)}. Index=${winningIndex}. Winner=${winner}`);
+
     await this.save();
 
-    // 3. Determine the Winner based on where we agreed to stop
-    // We set a timeout slightly less than 5000ms to ensure the data is ready before the Controller checks it.
+    // 4. Update status to "finished" when the spin animation completes (matches visual stop)
+    // This happens at the end of SPIN_DURATION, so the number is already set and can be displayed immediately
     setTimeout(async () => {
       this.gameState.status = "finished";
-
-      // Calculate which slice is under the pointer at -PI/2 (top of screen)
-      // IMPORTANT: Match the exact rendering logic from live/index.js
-      // Renderer: renderRotation = targetRotation % (2*PI), then ctx.rotate(renderRotation - PI/2)
-      // Pointer is at top: angle = -PI/2 (or 3*PI/2 in [0, 2PI] range)
-      const finalAngle = this.gameState.targetRotation;
-      const slices = this.gameState.wheelValues.length;
-      const sliceAngle = (Math.PI * 2) / slices;
-
-      // Normalize targetRotation to [0, 2PI] (same as renderer does)
-      let renderRotation = finalAngle % (Math.PI * 2);
-      if (renderRotation < 0) renderRotation += Math.PI * 2;
-
-      // The wheel is rotated by: renderRotation - PI/2
-      // Slice i starts at angle: i * sliceAngle (in wheel's local coordinates)
-      // After rotation, slice i is at: i * sliceAngle + (renderRotation - PI/2) (in global coordinates)
-      // Pointer is at: -PI/2 = 3*PI/2 (in global coordinates)
-      // We need to find which slice contains the pointer position
-
-      // Working backwards: if pointer is at 3*PI/2, and wheel is rotated by (renderRotation - PI/2),
-      // then in wheel's local coordinates, the pointer is at: 3*PI/2 - (renderRotation - PI/2)
-      // = 3*PI/2 - renderRotation + PI/2 = 2*PI - renderRotation
-      let pointerInLocalCoords = (2 * Math.PI - renderRotation) % (Math.PI * 2);
-      if (pointerInLocalCoords < 0) pointerInLocalCoords += Math.PI * 2;
-
-      // Find which slice contains this angle
-      const winningIndex = Math.floor(pointerInLocalCoords / sliceAngle) % slices;
-      const winner = this.gameState.wheelValues[winningIndex];
-
-      // Set the official winner
-      this.gameState.currentNumber = winner;
-
-      console.log(`[Physics] Stopped at ${finalAngle.toFixed(3)}. RenderRot=${renderRotation.toFixed(3)}. PointerLocal=${pointerInLocalCoords.toFixed(3)}. Index=${winningIndex}. Winner=${winner}`);
-
       await this.save();
-    }, 4900);
+    }, C.SPIN_DURATION);
   },
 
   async addWin(userId, username, score = 1) {
