@@ -1,8 +1,0 @@
-
-📊 Benchmark Results:
-- Total Real Time for 100 frames: 0.81s
-- Average Frame Rendering Time: 8.09ms
-- Max Potential FPS: 123.67 FPS
-- Target FPS: 30
-  
-✅ PASSED: System can comfortably handle 30 FPS.
