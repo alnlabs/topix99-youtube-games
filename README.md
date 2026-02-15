@@ -8,13 +8,13 @@ Interactive live game engine for YouTube streaming, featuring real-time chat int
 An interactive guessing game where viewers type numbers (1-100) in the chat to win points.
 - **Phases**: Guessing (10s) → Spinning (7s) → Reveal (5s) → Cooldown (5s).
 - **Scoring**: Single correct guess gives 10 points. Multiple guesses reduce the score (5 / guess count).
-- [Lucky Wheel Run Guide](./QUIZ_RUN_GUIDE.md) (Shared guide)
+- [Lucky Wheel Documentation](./src/games/luckywheel/README.md)
 
 ### 🧠 Quiz Showdown
 A fast-paced trivia game where viewers answer multiple-choice questions via chat.
 - **Multilingual Support**: Questions are available in English, Hindi, and Telugu.
 - **Optimized Rendering**: Features text measurement caching and efficient layout rendering for stable 1080p streaming.
-- [Quiz Run Guide](./QUIZ_RUN_GUIDE.md)
+- [Quiz Showdown Documentation](./src/games/quiz/README.md)
 
 ## 🎮 YouTube Gameplay
 
