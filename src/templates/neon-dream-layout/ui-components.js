@@ -241,10 +241,141 @@ const List = {
   }
 };
 
+/**
+ * Celebration Overlay
+ */
+const Celebration = {
+  confetti: [],
+
+  initConfetti(ctx) {
+    const colors = [
+      COLORS.NEON_BLUE,
+      COLORS.NEON_PINK,
+      COLORS.NEON_GREEN,
+      COLORS.NEON_YELLOW,
+      COLORS.NEON_PURPLE,
+      COLORS.NEON_ORANGE,
+    ];
+
+    this.confetti = Array.from({ length: 80 }, (_, i) => ({
+      x: Math.random() * ctx.canvas.width,
+      y: -20,
+      size: 8 + Math.random() * 8,
+      vx: (Math.random() - 0.5) * 8,
+      vy: 4 + Math.random() * 6,
+      color: colors[i % colors.length],
+      rotation: Math.random() * Math.PI * 2,
+      vrot: (Math.random() - 0.5) * 0.3,
+      isCircle: Math.random() > 0.5,
+      opacity: 0.6 + Math.random() * 0.4
+    }));
+  },
+
+  render(ctx, data, timestamp) {
+    const { winnerName, winnerAvatar, isVisible } = data;
+    if (!isVisible) {
+      this.confetti = [];
+      return;
+    }
+
+    if (this.confetti.length === 0) {
+      this.initConfetti(ctx);
+    }
+
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+
+    // 1. Render Confetti
+    ctx.save();
+    this.confetti.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rotation += p.vrot;
+
+      if (p.y > h + 20) {
+        p.y = -20;
+        p.x = Math.random() * w;
+      }
+
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.opacity;
+      ctx.fillStyle = p.color;
+
+      if (p.isCircle) {
+        ctx.beginPath();
+        ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      }
+      ctx.restore();
+    });
+    ctx.restore();
+
+    // 2. Winner Card
+    const cardW = 700;
+    const cardH = 450;
+    const cardX = (w - cardW) / 2;
+    const cardY = (h - cardH) / 2;
+
+    // Pulse effect
+    const pulse = Math.sin(timestamp * 0.005) * 0.05 + 1;
+    const glow = 20 + Math.sin(timestamp * 0.005) * 10;
+
+    drawNeonRect(ctx, cardX, cardY, cardW, cardH, 24, COLORS.NEON_PINK, "rgba(5, 5, 20, 0.95)", glow);
+
+    // Avatar with pulse
+    ctx.save();
+    ctx.translate(w / 2, cardY + 120);
+    ctx.scale(pulse, pulse);
+    ctx.font = "bold 140px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(winnerAvatar || "🏆", 0, 0);
+    ctx.restore();
+
+    // Winner Name
+    ctx.font = `bold ${TYPOGRAPHY.SIZE_TITLE}px ${TYPOGRAPHY.FONT_TITLE}`;
+    ctx.fillStyle = COLORS.FOREGROUND;
+    ctx.textAlign = "center";
+    ctx.shadowColor = COLORS.NEON_PINK;
+    ctx.shadowBlur = 15;
+    ctx.fillText(winnerName || "WINNER!", w / 2, cardY + 260);
+
+    // Points
+    ctx.font = `bold ${TYPOGRAPHY.SIZE_SUBTITLE}px ${TYPOGRAPHY.FONT_TITLE}`;
+    ctx.fillStyle = COLORS.NEON_YELLOW;
+    ctx.fillText("+100 POINTS!", w / 2, cardY + 330);
+
+    // Progress Bar (Decoration)
+    const barWidth = 400;
+    const barHeight = 8;
+    const barX = (w - barWidth) / 2;
+    const barY = cardY + 380;
+    const progress = (Math.sin(timestamp * 0.003) + 1) / 2;
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barWidth, barHeight, 4);
+    ctx.fill();
+
+    ctx.fillStyle = COLORS.NEON_BLUE;
+    ctx.shadowColor = COLORS.NEON_BLUE;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barWidth * progress, barHeight, 4);
+    ctx.fill();
+    ctx.restore();
+  }
+};
+
 module.exports = {
   Background,
   Timer,
   Button,
   Card,
-  List
+  List,
+  Celebration
 };
