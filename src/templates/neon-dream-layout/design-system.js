@@ -62,6 +62,8 @@ const LAYOUT = {
     right: 40,
   },
 
+  LOGO_ICON_SIZE: 90,
+
   SPACING: {
     XS: 4,
     S: 8,

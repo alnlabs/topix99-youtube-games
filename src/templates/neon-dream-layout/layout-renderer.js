@@ -7,9 +7,35 @@ const uiComponents = require("./ui-components");
 const { COLORS, LAYOUT, TYPOGRAPHY } = designSystem;
 const { Background, Card, List, Timer, Button } = uiComponents;
 const { hslAlpha, getCachedMeasure } = require("./utils");
+const { loadImage } = require("canvas");
+const path = require("path");
 
 const WIDTH = designSystem.CANVAS.WIDTH;
 const HEIGHT = designSystem.CANVAS.HEIGHT;
+
+// Logo image cache
+let logoImage = null;
+let logoLoading = false;
+
+/**
+ * Pre-load logo image
+ */
+async function loadLogo() {
+  if (logoImage || logoLoading) return logoImage;
+  logoLoading = true;
+  try {
+    const logoRelPath = "../../../assets/images/logo.png";
+    const logoFullPath = path.resolve(__dirname, logoRelPath);
+    logoImage = await loadImage(logoFullPath);
+    console.log("[neon-dream-layout] Logo image loaded successfully");
+  } catch (err) {
+    console.error("[neon-dream-layout] Failed to load logo image:", err.message);
+    logoImage = null;
+  } finally {
+    logoLoading = false;
+  }
+  return logoImage;
+}
 
 function renderDefaultLayout(ctx, uiData, options = {}) {
   if (!options.skipBackground) {
@@ -60,12 +86,30 @@ function renderDefaultLayout(ctx, uiData, options = {}) {
 function renderHeader(ctx, data, x, y, w, h) {
   const { title, badge, timer } = data;
 
+  // Trigger logo load (async, will be available in next frames)
+  if (!logoImage && !logoLoading) {
+    loadLogo();
+  }
+
+  const iconSize = LAYOUT.LOGO_ICON_SIZE || 64;
+  const brandY = y + h / 2;
+  let currentX = x;
+
+  // Draw Logo Image if loaded
+  if (logoImage) {
+    const imgWidth = iconSize;
+    const imgHeight = (logoImage.height / logoImage.width) * imgWidth;
+    // Vertically center the image exactly on brandY (which is the baseline for textBaseline middle)
+    ctx.drawImage(logoImage, x, brandY - imgHeight / 2, imgWidth, imgHeight);
+    currentX += imgWidth + LAYOUT.SPACING.L; // Increased spacing after larger logo
+  }
+
   // TOPIX99 Brand
   ctx.font = `bold ${TYPOGRAPHY.SIZE_TITLE}px ${TYPOGRAPHY.FONT_TITLE}`;
   ctx.fillStyle = COLORS.NEON_PINK;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillText("TOPIX99", x, y + h / 2);
+  ctx.fillText("TOPIX99", currentX, brandY);
 
   const brandFont = `bold ${TYPOGRAPHY.SIZE_TITLE}px ${TYPOGRAPHY.FONT_TITLE}`;
   const brandW = getCachedMeasure(ctx, "TOPIX99", brandFont);
@@ -73,7 +117,7 @@ function renderHeader(ctx, data, x, y, w, h) {
   // Game Title
   ctx.font = `bold ${TYPOGRAPHY.SIZE_SUBTITLE}px ${TYPOGRAPHY.FONT_SECONDARY}`;
   ctx.fillStyle = COLORS.FOREGROUND;
-  ctx.fillText(title || "QUIZ SHOWDOWN", x + brandW + LAYOUT.SPACING.L, y + h / 2);
+  ctx.fillText(title || "QUIZ SHOWDOWN", currentX + brandW + LAYOUT.SPACING.L, brandY);
 
   // Timer (Right side of header)
   if (timer) {
