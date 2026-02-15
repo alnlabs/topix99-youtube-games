@@ -10,6 +10,12 @@ const { COLORS } = require("./design-system");
 const textCache = new Map();
 const MAX_CACHE_SIZE = 1000;
 
+/**
+ * Font Fitting Cache (stores calculated font sizes and line splits)
+ */
+const fittingCache = new Map();
+const MAX_FITTING_CACHE = 500;
+
 function getCachedMeasure(ctx, text, font) {
   // Safer key to avoid collisions
   const key = font + "|" + text;
@@ -86,50 +92,63 @@ function drawNeonRect(ctx, x, y, w, h, radius, borderCol, fillCol, glowSize = 10
 }
 
 /**
- * Draw wrapped text with auto-scaling
+ * Draw wrapped text with auto-scaling (Optimized)
  */
 function drawWrappedText(ctx, text, x, y, maxWidth, font, color, align = "left", containerHeight = 0, vAlign = "top") {
   if (!text) return 0;
-  ctx.save();
 
-  let currentFontSize = parseInt(font.match(/\d+/)?.[0] || "16");
+  const originalFontSize = parseInt(font.match(/\d+/)?.[0] || "16");
   const fontName = font.replace(/^\d+px\s+/, "").replace(/^bold\s+\d+px\s+/, "");
   const isBold = font.includes("bold");
+  const cacheKey = `${text}|${maxWidth}|${containerHeight}|${fontName}|${isBold}`;
 
   let lines = [];
-  let lineHeight = currentFontSize * 1.3;
+  let lineHeight = 0;
   let totalTextHeight = 0;
-  let scaledFont = font;
+  let currentFontSize = originalFontSize;
 
-  // Font scaling loop
-  while (currentFontSize > 12) {
-    scaledFont = `${isBold ? "bold " : ""}${currentFontSize}px ${fontName}`;
-    ctx.font = scaledFont;
+  if (fittingCache.has(cacheKey)) {
+    const cached = fittingCache.get(cacheKey);
+    currentFontSize = cached.size;
+    lines = cached.lines;
     lineHeight = currentFontSize * 1.3;
-
-    const words = text.toString().trim().split(/\s+/);
-    lines = [];
-    let currentLine = words[0];
-
-    for (let i = 1; i < words.length; i++) {
-        const word = words[i];
-        const testLine = currentLine + " " + word;
-        if (getCachedMeasure(ctx, testLine, scaledFont) > maxWidth) {
-            lines.push(currentLine);
-            currentLine = word;
-        } else {
-            currentLine = testLine;
-        }
-    }
-    lines.push(currentLine);
     totalTextHeight = lines.length * lineHeight;
+  } else {
+    const words = text.toString().trim().split(/\s+/);
 
-    if (containerHeight === 0 || totalTextHeight <= containerHeight) {
-        break; // Fits vertically or no limit
+    while (currentFontSize > 12) {
+      const scaledFont = `${isBold ? "bold " : ""}${currentFontSize}px ${fontName}`;
+      ctx.font = scaledFont;
+      lineHeight = currentFontSize * 1.3;
+
+      lines = [];
+      let currentLine = words[0];
+
+      for (let i = 1; i < words.length; i++) {
+          const word = words[i];
+          const testLine = currentLine + " " + word;
+          if (getCachedMeasure(ctx, testLine, scaledFont) > maxWidth) {
+              lines.push(currentLine);
+              currentLine = word;
+          } else {
+              currentLine = testLine;
+          }
+      }
+      lines.push(currentLine);
+      totalTextHeight = lines.length * lineHeight;
+
+      if (containerHeight === 0 || totalTextHeight <= containerHeight) break;
+      currentFontSize -= 2;
     }
-    currentFontSize -= 2; // Shrink
+
+    if (fittingCache.size >= MAX_FITTING_CACHE) {
+      fittingCache.delete(fittingCache.keys().next().value);
+    }
+    fittingCache.set(cacheKey, { size: currentFontSize, lines: [...lines] });
   }
 
+  ctx.save();
+  ctx.font = `${isBold ? "bold " : ""}${currentFontSize}px ${fontName}`;
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "top";
@@ -152,7 +171,7 @@ function drawWrappedText(ctx, text, x, y, maxWidth, font, color, align = "left",
 }
 
 /**
- * Draw multilingual text with auto-scaling
+ * Draw multilingual text with auto-scaling (Optimized)
  */
 function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "left", joinLines = false, containerHeight = 0, vAlign = "top") {
   if (!text) return 0;
@@ -171,51 +190,68 @@ function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "l
     return drawWrappedText(ctx, joinedText, x, y, maxWidth, font, color, align, containerHeight, vAlign);
   }
 
-  ctx.save();
-  let currentFontSize = parseInt(font.match(/\d+/)?.[0] || "16");
+  const originalFontSize = parseInt(font.match(/\d+/)?.[0] || "16");
   const fontName = font.replace(/^\d+px\s+/, "").replace(/^bold\s+\d+px\s+/, "");
   const isBold = font.includes("bold");
+  const cacheKey = `ML|${JSON.stringify(text)}|${maxWidth}|${containerHeight}|${fontName}|${isBold}`;
 
   let languagesWithLines = [];
   let totalHeight = 0;
-  let lineHeight = currentFontSize * 1.3;
-  let languageSpacing = currentFontSize * 0.3;
-  let scaledFont = font;
+  let currentFontSize = originalFontSize;
+  let lineHeight = 0;
+  let languageSpacing = 0;
 
-  // Font scaling loop
-  while (currentFontSize > 12) {
-    scaledFont = `${isBold ? "bold " : ""}${currentFontSize}px ${fontName}`;
-    ctx.font = scaledFont;
+  if (fittingCache.has(cacheKey)) {
+    const cached = fittingCache.get(cacheKey);
+    currentFontSize = cached.size;
+    languagesWithLines = cached.languagesWithLines;
     lineHeight = currentFontSize * 1.3;
     languageSpacing = currentFontSize * 0.3;
-
-    languagesWithLines = languages.map(lang => {
-        const words = lang.text.split(/\s+/);
-        const lines = [];
-        let curLine = words[0];
-
-        for (let i = 1; i < words.length; i++) {
-            const word = words[i];
-            const test = curLine + " " + word;
-            if (getCachedMeasure(ctx, test, scaledFont) > maxWidth) {
-                lines.push(curLine);
-                curLine = word;
-            } else {
-                curLine = test;
-            }
-        }
-        lines.push(curLine);
-        return lines;
-    });
-
     totalHeight = languagesWithLines.reduce((acc, lines, idx) => {
         return acc + (lines.length * lineHeight) + (idx > 0 ? languageSpacing : 0);
     }, 0);
+  } else {
+    while (currentFontSize > 12) {
+      const scaledFont = `${isBold ? "bold " : ""}${currentFontSize}px ${fontName}`;
+      ctx.font = scaledFont;
+      lineHeight = currentFontSize * 1.3;
+      languageSpacing = currentFontSize * 0.3;
 
-    if (containerHeight === 0 || totalHeight <= containerHeight) break;
-    currentFontSize -= 2;
+      languagesWithLines = languages.map(lang => {
+          const words = lang.text.split(/\s+/);
+          const lines = [];
+          let curLine = words[0];
+
+          for (let i = 1; i < words.length; i++) {
+              const word = words[i];
+              const test = curLine + " " + word;
+              if (getCachedMeasure(ctx, test, scaledFont) > maxWidth) {
+                  lines.push(curLine);
+                  curLine = word;
+              } else {
+                  curLine = test;
+              }
+          }
+          lines.push(curLine);
+          return lines;
+      });
+
+      totalHeight = languagesWithLines.reduce((acc, lines, idx) => {
+          return acc + (lines.length * lineHeight) + (idx > 0 ? languageSpacing : 0);
+      }, 0);
+
+      if (containerHeight === 0 || totalHeight <= containerHeight) break;
+      currentFontSize -= 2;
+    }
+
+    if (fittingCache.size >= MAX_FITTING_CACHE) {
+        fittingCache.delete(fittingCache.keys().next().value);
+    }
+    fittingCache.set(cacheKey, { size: currentFontSize, languagesWithLines: [...languagesWithLines] });
   }
 
+  ctx.save();
+  ctx.font = `${isBold ? "bold " : ""}${currentFontSize}px ${fontName}`;
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "top";
