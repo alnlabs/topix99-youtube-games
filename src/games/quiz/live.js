@@ -1,17 +1,18 @@
+// File: src/games/quiz/live.js
+
 /**
  * Quiz Game - YouTube Live Streaming
  *
  * This module uses the YouTubeStreamer library to stream the Quiz game to YouTube Live.
+ * Uses the showdown-layout template for UI rendering.
  */
 
 const path = require("path");
 const { YouTubeStreamer } = require("../../core");
-const {
-  WIDTH,
-  HEIGHT,
-  FPS,
-  drawQuizUI,
-} = require("./renderer");
+const template = require("../../templates/neon-dream-layout");
+const { renderQuizUI } = require("./template-renderer");
+const C = require("./constants");
+const { WIDTH, HEIGHT, FPS } = C;
 const { logger } = require("../../services");
 
 /**
@@ -24,13 +25,26 @@ async function startLive(rtmpUrl, game) {
   // Create streamer instance
   const streamer = new YouTubeStreamer({
     rtmpUrl,
-    width: WIDTH,
-    height: HEIGHT,
-    fps: FPS,
+    width: WIDTH, // 1920
+    height: HEIGHT, // 1080
+    fps: FPS, // 30
+
     bgmPath: path.join(__dirname, "../../../assets/sounds/bgm.mp3"),
+
+    // 🔥 Optimized FFmpeg settings for seamless streaming
+    ffmpegOptions: {
+      videoEncoder: "h264_videotoolbox",
+      videoBitrate: "6000k",
+      maxBitrate: "6000k",
+      bufsize: "12000k",
+      gop: "60",
+      audioBitrate: "128k",
+    },
+
     syncState: async () => {
-      // Sync game state from Redis
-      await game.load();
+      // NOTE: We no longer call await game.load() here!
+      // Since streamer and game run in the same process, we use the in-memory state directly.
+      // This eliminates 30+ Redis roundtrips and JSON parses per second.
       const gameState = game.getStateSync();
       const leaderboard = game.getLeaderboardSync();
 
@@ -39,14 +53,15 @@ async function startLive(rtmpUrl, game) {
         leaderboard: leaderboard || [],
       };
     },
-    syncInterval: 500,
+
+    syncInterval: 500, // Sync every 500ms since it's local and fast
+
     renderFrame: (ctx, state) => {
-      // Extract state
       const gameState = state.gameState || {};
       const leaderboard = state.leaderboard || [];
 
-      // Render quiz UI
-      drawQuizUI(ctx, gameState, leaderboard);
+      // Pass timestamp for animations
+      renderQuizUI(ctx, gameState, leaderboard, Date.now());
     },
   });
 

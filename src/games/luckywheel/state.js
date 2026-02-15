@@ -5,12 +5,14 @@ const C = require("./constants");
 // Use different Redis keys to keep test and live data separate
 // Test mode is detected via TEST_MODE environment variable set in test.js
 const IS_TEST_MODE = process.env.TEST_MODE === "true";
-const GAME_KEY = IS_TEST_MODE ? "game:luckwheel:test" : "game:luckwheel";
-const LEADERBOARD_KEY = IS_TEST_MODE ? "leaderboard:luckwheel:test" : "leaderboard:luckwheel";
+const GAME_KEY = IS_TEST_MODE ? "game:luckywheel:test" : "game:luckywheel";
+const LEADERBOARD_KEY = IS_TEST_MODE ? "leaderboard:luckywheel:test" : "leaderboard:luckywheel";
 
 // Log which mode we're in for debugging
-console.log(`[state] Running in ${IS_TEST_MODE ? "TEST" : "LIVE"} mode`);
-console.log(`[state] Using Redis keys: GAME_KEY="${GAME_KEY}", LEADERBOARD_KEY="${LEADERBOARD_KEY}"`);
+if (IS_TEST_MODE) {
+  console.log(`[state] Running in TEST mode`);
+  console.log(`[state] Using Redis keys: GAME_KEY="${GAME_KEY}", LEADERBOARD_KEY="${LEADERBOARD_KEY}"`);
+}
 
 module.exports = {
   gameState: {

@@ -1,3 +1,5 @@
+// File: src/games/quiz/game.js
+
 const state = require("./state");
 const C = require("./constants");
 const { logger } = require("../../services");
@@ -18,7 +20,7 @@ class QuizGame {
   }
 
   _clearAllTimeouts() {
-    this.timeouts.forEach(timeout => clearTimeout(timeout));
+    this.timeouts.forEach((timeout) => clearTimeout(timeout));
     this.timeouts.clear();
   }
 
@@ -33,6 +35,7 @@ class QuizGame {
   }
 
   async goToQuestion() {
+    this._clearAllTimeouts();
     try {
       state.gameState.status = "question";
       state.gameState.round++;
@@ -48,69 +51,167 @@ class QuizGame {
         logger.info(`[quiz-game] All questions used, starting new cycle`);
       }
 
-      // Get available (unused) question indices
-      const availableIndices = [];
-      for (let i = 0; i < questions.length; i++) {
-        if (!state.gameState.usedQuestionIndices.includes(i)) {
-          availableIndices.push(i);
-        }
+      // --- CATEGORY-BASED SELECTION ---
+      const { categorizedQuestions } = require("./data");
+
+      // 1. Identify categories with available (unused) questions
+      const availableCategories = Object.keys(categorizedQuestions).filter(cat => {
+        const indices = categorizedQuestions[cat];
+        return indices.some(idx => !state.gameState.usedQuestionIndices.includes(idx));
+      });
+
+      if (availableCategories.length === 0) {
+        state.gameState.usedQuestionIndices = [];
+        logger.info(`[quiz-game] All questions in all categories used, resetting cycle`);
+        // Recalculate available categories after reset
+        return this.goToQuestion(); // Restart with fresh indices
       }
 
-      // Randomly pick from available questions
-      const randomIndex = Math.floor(Math.random() * availableIndices.length);
-      state.gameState.currentQuestionIndex = availableIndices[randomIndex];
+      // 2. Pick a random category
+      const randomCat = availableCategories[Math.floor(Math.random() * availableCategories.length)];
+
+      // 3. Pick random unused question from that category
+      const catIndices = categorizedQuestions[randomCat];
+      const availableInCat = catIndices.filter(idx => !state.gameState.usedQuestionIndices.includes(idx));
+      const randomIndex = Math.floor(Math.random() * availableInCat.length);
+      state.gameState.currentQuestionIndex = availableInCat[randomIndex];
+
+      logger.info(`[quiz-game] Cycle: ${state.gameState.usedQuestionIndices.length + 1}/${questions.length}. Category: ${randomCat} (${availableInCat.length} left). Index: ${state.gameState.currentQuestionIndex}`);
+      logger.info(`[quiz-game] Questions remaining in current cycle: ${questions.length - (state.gameState.usedQuestionIndices.length + 1)}`);
 
       // Mark this question as used
-      state.gameState.usedQuestionIndices.push(state.gameState.currentQuestionIndex);
+      state.gameState.usedQuestionIndices.push(
+        state.gameState.currentQuestionIndex
+      );
 
       state.gameState.winnerId = null;
       state.gameState.selectedAnswerIndex = null;
       state.gameState.participants = new Map(); // Clear participants for new question
 
       const question = questions[state.gameState.currentQuestionIndex];
-      state.gameState.timeLeft = question.timeLimit;
-      state.gameState.timerEnd = Date.now() + (question.timeLimit * 1000);
+      const timeLimit = question.timeLimit || 15; // Default to 15 if not specified
+      state.gameState.timeLeft = timeLimit;
+      state.gameState.totalTime = timeLimit;
+      state.gameState.timerEnd = Date.now() + timeLimit * 1000;
 
       await state.save();
-      const { getQuestionDisplayString } = require("./utils");
-      logger.info(`[quiz-game] Round ${state.gameState.round} - Question: ${getQuestionDisplayString(question)}`);
+      const { getQuestionDisplayString, transformQuestionMultilingual } = require("./utils");
+
+      // Populate state with localized question data for renderer (multilingual)
+      const transformed = transformQuestionMultilingual(question);
+      state.gameState.questionText = transformed.questionText;
+      state.gameState.options = transformed.options;
+      state.gameState.correctAnswerIndex = transformed.correctIndex;
+
+      await state.save();
+
+      logger.info(
+        `[quiz-game] Round ${
+          state.gameState.round
+        } - Question: ${getQuestionDisplayString(question)}`
+      );
 
       // Update timer countdown
-      const updateTimer = () => {
-        if (state.gameState.status !== "question") return;
-        const now = Date.now();
-        const remaining = Math.max(0, Math.floor((state.gameState.timerEnd - now) / 1000));
-        state.gameState.timeLeft = remaining;
+      let lastSaveTime = Date.now();
+      const SAVE_INTERVAL = 1000; // Save once per second instead of every 100ms
 
-        if (remaining <= 0) {
-          this.goToReveal();
-        } else {
-          this._setTimeout(updateTimer, 1000);
+      const updateTimer = async () => {
+        try {
+          // Double-check status before continuing
+          if (state.gameState.status !== "question") return;
+
+          const now = Date.now();
+          const remaining = Math.max(0, Math.ceil((state.gameState.timerEnd - now) / 1000));
+          state.gameState.timeLeft = remaining;
+
+          // Only save state every second to reduce Redis writes
+          if (now - lastSaveTime >= SAVE_INTERVAL) {
+            lastSaveTime = now;
+            // Save state to ensure timer updates are reflected in UI
+            try {
+              await state.save();
+            } catch (err) {
+              logger.error(`[quiz-game] Error saving timer state: ${err.message}`);
+            }
+          }
+
+          if (remaining <= 0) {
+            // Timer reached zero, go to reveal phase
+            state.gameState.timeLeft = 0;
+            try {
+              await state.save();
+            } catch (err) {
+              logger.error(`[quiz-game] Error saving final timer state: ${err.message}`);
+            }
+            // Use setTimeout to ensure we're not in a tight call stack
+            this._setTimeout(async () => {
+              try {
+                await this.goToReveal();
+              } catch (e) {
+                logger.error(`[quiz-game] Error in goToReveal transition: ${e.message}`);
+              }
+            }, 0);
+          } else {
+            // Continue updating every 100ms for smoother UI updates but save less frequently
+            this._setTimeout(updateTimer, 100);
+          }
+        } catch (err) {
+          logger.error(`[quiz-game] Uncaught error in updateTimer: ${err.message}`);
+          // Recover by trying to go to reveal if we're stuck
+          this._setTimeout(() => this.goToReveal(), 5000);
         }
       };
-      updateTimer();
+
+      // Start the timer
+      updateTimer().catch(err => {
+        logger.error(`[quiz-game] Fatal error in updateTimer start: ${err.message}`);
+      });
     } catch (err) {
       logger.error(`[quiz-game] Failed to start question: ${err.message}`);
-      throw err;
+      // Don't throw, just retry
+      this._setTimeout(() => this.goToQuestion(), 5000);
     }
   }
 
   async goToReveal() {
-    try {
-      await state.load(); // Reload to get latest participants
-      state.gameState.status = "reveal";
+    this._clearAllTimeouts();
+    // Prevent multiple executions if already transitioning
+    if (state.gameState.status !== "question") {
+      logger.debug(
+        `[quiz-game] goToReveal called but status is ${state.gameState.status}, skipping`
+      );
+      return;
+    }
 
-      const question = questions[state.gameState.currentQuestionIndex];
-      if (!question) {
-        await state.save();
-        this._setTimeout(() => this.goToNext(), C.REVEAL_DURATION);
+    try {
+      // Check participants BEFORE changing status to reveal
+      const totalParticipants = state.gameState.participants?.size || 0;
+
+      if (totalParticipants === 0) {
+        logger.info("[quiz-game] No participants this round, skipping reveal phase");
+        // Update status to reveal briefly or skip to next?
+        // User said "dont show answer", so let's skip reveal status.
+        this._setTimeout(async () => {
+          try {
+            await this.goToNext();
+          } catch (e) {
+            logger.error(`[quiz-game] Error skipping to next: ${e.message}`);
+          }
+        }, 1000);
         return;
       }
 
-      // Find correct answerers (those who answered the correct option)
-      const correctAnswerers = [];
-      if (state.gameState.participants && state.gameState.participants instanceof Map) {
+      state.gameState.status = "reveal";
+
+      const question = questions[state.gameState.currentQuestionIndex];
+      const correctAnswerers = []; // Fix: Declare correctAnswerers
+
+      if (
+        state.gameState.participants &&
+        state.gameState.participants instanceof Map
+      ) {
         state.gameState.participants.forEach((participant, key) => {
+          logger.debug(`[quiz-game] Checking participant ${key}: answerIndex=${participant.answerIndex}`);
           if (participant.answerIndex === question.correctIndex) {
             const [userId, username] = key.split("|");
             correctAnswerers.push({
@@ -118,6 +219,7 @@ class QuizGame {
               username: participant.username || username,
               timestamp: participant.timestamp || Date.now(),
             });
+            logger.info(`[quiz-game] Matched correct answerer: ${username}`);
           }
         });
       }
@@ -126,25 +228,45 @@ class QuizGame {
       correctAnswerers.sort((a, b) => a.timestamp - b.timestamp);
 
       // Determine winner (80% chance someone answered correctly, and we have correct answers)
-      const hasWinner = correctAnswerers.length > 0 && Math.random() < C.CORRECT_ANSWER_CHANCE;
+      const hasWinner =
+        correctAnswerers.length > 0 && Math.random() < C.CORRECT_ANSWER_CHANCE;
       let winnerId = null;
+
+      logger.info(`[quiz-game] Correct answerers found: ${correctAnswerers.length}, hasWinner: ${hasWinner}`);
 
       if (hasWinner && correctAnswerers.length > 0) {
         // Fastest correct answerer wins
         const winner = correctAnswerers[0];
         winnerId = winner.userId;
 
-        const bonus = C.BASE_SCORE + Math.floor(Math.random() * C.BONUS_SCORE_RANGE);
+        const bonus =
+          C.BASE_SCORE + Math.floor(Math.random() * C.BONUS_SCORE_RANGE);
         await state.addScore(winnerId, winner.username, bonus);
 
         // Reload to get updated score
         await state.load();
-        const updatedWinner = state.cachedLeaderboard.find(p =>
-          (p.userId || p.username) === winnerId
+        const updatedWinner = state.cachedLeaderboard.find(
+          (p) => (p.userId || p.username) === winnerId
         );
 
         if (updatedWinner) {
-          // Add to recent answers
+          // Add to recent answers (maintain uniqueness)
+          // Look for existing entry for this player by ID or Name (Case-Insensitive)
+          const candidateName = (winner.username || "").toLowerCase().trim();
+          const candidateId = String(winnerId || "").toLowerCase();
+
+          const existingIdx = state.gameState.recentAnswers.findIndex(a => {
+            const entryId = String(a.playerId || "").toLowerCase();
+            const entryName = (a.playerName || "").toLowerCase().trim();
+            return (candidateId && entryId === candidateId) ||
+                   (candidateName && entryName === candidateName);
+          });
+
+          if (existingIdx !== -1) {
+            logger.info(`[quiz-game] Deduplicating recent answer for ${winner.username} (Removed index ${existingIdx})`);
+            state.gameState.recentAnswers.splice(existingIdx, 1);
+          }
+
           state.gameState.recentAnswers.push({
             playerId: winnerId,
             playerName: winner.username,
@@ -157,22 +279,41 @@ class QuizGame {
 
           // Keep only last N recent answers
           if (state.gameState.recentAnswers.length > C.RECENT_ANSWERS_COUNT) {
-            state.gameState.recentAnswers = state.gameState.recentAnswers.slice(-C.RECENT_ANSWERS_COUNT);
+            state.gameState.recentAnswers = state.gameState.recentAnswers.slice(
+              -C.RECENT_ANSWERS_COUNT
+            );
           }
 
           state.gameState.winnerId = winnerId;
-          logger.info(`[quiz-game] Winner: ${winner.username} (fastest correct answer)`);
+          state.gameState.winnerUsername = winner.username;
+          logger.info(
+            `[quiz-game] Winner: ${winner.username} (fastest correct answer)`
+          );
         }
       } else {
-        logger.info(`[quiz-game] No winner this round (no correct answers or random chance)`);
+        logger.info(
+          `[quiz-game] No winner this round (no correct answers or random chance)`
+        );
       }
 
       await state.save();
 
       if (winnerId) {
-        this._setTimeout(() => this.goToCelebration(), C.REVEAL_DURATION);
+        this._setTimeout(async () => {
+          try {
+            await this.goToCelebration();
+          } catch (e) {
+            logger.error(`[quiz-game] Error in goToCelebration transition: ${e.message}`);
+          }
+        }, C.REVEAL_DURATION);
       } else {
-        this._setTimeout(() => this.goToNext(), C.REVEAL_DURATION + C.NEXT_QUESTION_DELAY);
+        this._setTimeout(async () => {
+          try {
+            await this.goToNext();
+          } catch (e) {
+            logger.error(`[quiz-game] Error in goToNext transition: ${e.message}`);
+          }
+        }, C.REVEAL_DURATION + C.NEXT_QUESTION_DELAY);
       }
     } catch (err) {
       logger.error(`[quiz-game] Failed to reveal answer: ${err.message}`);
@@ -181,10 +322,13 @@ class QuizGame {
   }
 
   async goToCelebration() {
+    this._clearAllTimeouts();
     try {
       state.gameState.status = "celebration";
       await state.save();
-      logger.info(`[quiz-game] Celebrating winner: ${state.gameState.winnerId}`);
+      logger.info(
+        `[quiz-game] Celebrating winner: ${state.gameState.winnerId}`
+      );
 
       this._setTimeout(() => this.goToNext(), C.CELEBRATION_DURATION);
     } catch (err) {
@@ -194,10 +338,18 @@ class QuizGame {
   }
 
   async goToNext() {
+    this._clearAllTimeouts();
     try {
+      logger.info(`[quiz-game] Transitioning to next round...`);
       state.gameState.status = "next";
       await state.save();
-      this._setTimeout(() => this.goToQuestion(), C.NEXT_QUESTION_DELAY);
+      this._setTimeout(async () => {
+        try {
+          await this.goToQuestion();
+        } catch (e) {
+          logger.error(`[quiz-game] Error in goToQuestion transition from next: ${e.message}`);
+        }
+      }, C.NEXT_QUESTION_DELAY);
     } catch (err) {
       logger.error(`[quiz-game] Failed to go to next: ${err.message}`);
       this._setTimeout(() => this.goToQuestion(), 1000);
@@ -205,6 +357,8 @@ class QuizGame {
   }
 
   async processChatMessage(userId, username, message) {
+    logger.info(`[quiz-game] Processing message from ${username}: "${message}" (Status: ${state.gameState.status})`);
+
     // Only accept answers during question phase
     if (state.gameState.status !== "question") {
       return;
@@ -214,48 +368,68 @@ class QuizGame {
     if (!question) return;
 
     // Extract answer option (A, B, C, D or 1, 2, 3, 4)
-    const normalized = message.trim().toUpperCase();
+    const normalized = String(message || "").trim().toUpperCase();
     let answerIndex = -1;
 
-    // Check for letter answers (A, B, C, D) - can be standalone or with period
-    if (normalized === "A" || normalized === "A." || normalized.startsWith("A ")) answerIndex = 0;
-    else if (normalized === "B" || normalized === "B." || normalized.startsWith("B ")) answerIndex = 1;
-    else if (normalized === "C" || normalized === "C." || normalized.startsWith("C ")) answerIndex = 2;
-    else if (normalized === "D" || normalized === "D." || normalized.startsWith("D ")) answerIndex = 3;
-    // Check for number answers (1, 2, 3, 4)
-    else if (normalized === "1" || normalized === "1." || normalized.startsWith("1 ")) answerIndex = 0;
-    else if (normalized === "2" || normalized === "2." || normalized.startsWith("2 ")) answerIndex = 1;
-    else if (normalized === "3" || normalized === "3." || normalized.startsWith("3 ")) answerIndex = 2;
-    else if (normalized === "4" || normalized === "4." || normalized.startsWith("4 ")) answerIndex = 3;
+    // Standard labels
+    const labels = ["A", "B", "C", "D"];
+
+    // Check for exact match or starts with label plus space/period
+    for (let i = 0; i < labels.length; i++) {
+        const L = labels[i];
+        if (normalized === L || normalized.startsWith(L + ".") || normalized.startsWith(L + " ")) {
+            answerIndex = i;
+            break;
+        }
+    }
+
+    // Check for number answers (1, 2, 3, 4) if not found yet
+    if (answerIndex === -1) {
+        for (let i = 0; i < 4; i++) {
+            const num = (i + 1).toString();
+            if (normalized === num || normalized.startsWith(num + ".") || normalized.startsWith(num + " ")) {
+                answerIndex = i;
+                break;
+            }
+        }
+    }
 
     if (answerIndex < 0 || answerIndex >= question.options.length) {
       return; // Invalid answer
     }
 
-    const labels = ["A", "B", "C", "D"];
-
     // Store participant answer
     try {
-      // For quiz, we only keep the first answer per user per question
-      // (unlike luckywheel which allows multiple guesses)
+      const status = state.gameState.status;
+      const numOptions = question.options?.length || 0;
+
+      if (status !== "question") {
+        logger.warn(`[quiz-game] Received answer "${message}" but status is ${status}`);
+        return;
+      }
+
       const key = `${userId}|${username}`;
-      const existing = state.gameState.participants?.get?.(key);
+      if (!state.gameState.participants) {
+        state.gameState.participants = new Map();
+        logger.info("[quiz-game] Initialized new participants Map");
+      }
+
+      const existing = state.gameState.participants.get(key);
 
       if (!existing) {
-        // First answer from this user for this question
-        if (!state.gameState.participants) {
-          state.gameState.participants = new Map();
-        }
         state.gameState.participants.set(key, {
           userId,
           username: username || "Anonymous",
           answerIndex,
           timestamp: Date.now(),
         });
-        logger.debug(`[quiz-game] User ${username} (${userId}) answered: ${question.options[answerIndex]}`);
+
+        const count = state.gameState.participants.size;
+        logger.info(`[quiz-game] User ${username} answered: ${answerIndex} (Map size: ${count})`);
         await state.save();
+      } else {
+        logger.debug(`[quiz-game] User ${username} already answered, skipping`);
       }
-      // If user already answered, ignore (only first answer counts)
     } catch (err) {
       logger.error(`[quiz-game] Failed to save answer: ${err.message}`);
     }

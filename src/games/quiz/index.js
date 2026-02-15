@@ -1,3 +1,5 @@
+// File: src/games/quiz/index.js
+
 /**
  * Quiz Game
  *
@@ -5,7 +7,14 @@
  */
 
 const GameClass = require("./game");
-const renderer = require("./renderer");
+// Use template-renderer instead of old renderer.js for consistency
+const templateRenderer = require("./template-renderer");
+const renderer = {
+  drawQuizUI: templateRenderer.renderQuizUI, // Map old API to new template renderer
+  WIDTH: templateRenderer.WIDTH,
+  HEIGHT: templateRenderer.HEIGHT,
+  FPS: templateRenderer.FPS,
+};
 const startLive = require("./live");
 const startTest = require("./test");
 

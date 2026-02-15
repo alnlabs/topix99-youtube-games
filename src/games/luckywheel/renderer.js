@@ -7,7 +7,14 @@ const path = require("path");
 const { registerFont } = require("canvas");
 const C = require("./constants");
 const { shapes, calculateFontSizeForHeight } = require("../../services");
-const { drawRoundedRect, drawRect, drawCircle, drawTriangle, drawProgressBar, drawSector } = shapes;
+const {
+  drawRoundedRect,
+  drawRect,
+  drawCircle,
+  drawTriangle,
+  drawProgressBar,
+  drawSector,
+} = shapes;
 
 // Canvas dimensions
 const WIDTH = 1920;
@@ -55,9 +62,7 @@ const palettes = [
  */
 function drawBackground(ctx, palette = palettes[0]) {
   const grad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-  palette.forEach((c, i) =>
-    grad.addColorStop(i / (palette.length - 1), c)
-  );
+  palette.forEach((c, i) => grad.addColorStop(i / (palette.length - 1), c));
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 }
@@ -79,7 +84,9 @@ function drawWinnerUI(ctx, cx, cy, r, s) {
   const glow = 20 + Math.sin(now / 300) * 20;
 
   // Get winner username from celebration or winners array
-  const winnerUsername = s.celebration?.username || (s.winners && s.winners.length > 0 ? s.winners[0].username : null);
+  const winnerUsername =
+    s.celebration?.username ||
+    (s.winners && s.winners.length > 0 ? s.winners[0].username : null);
 
   ctx.save();
   ctx.translate(cx, cy);
@@ -100,7 +107,15 @@ function drawWinnerUI(ctx, cx, cy, r, s) {
   // Draw celebration box - MODIFY: Change "#FF3B30" (red) and dimensions to customize celebration appearance
   // Make box taller if we have a username to display
   const boxHeight = winnerUsername ? 120 : 80;
-  drawRoundedRect(ctx, -225, -r - 110 + pulse / 2, 450, boxHeight, 15, "#FF3B30");
+  drawRoundedRect(
+    ctx,
+    -225,
+    -r - 110 + pulse / 2,
+    450,
+    boxHeight,
+    15,
+    "#FF3B30"
+  );
   // Reset shadow
   ctx.shadowBlur = 0;
 
@@ -108,7 +123,11 @@ function drawWinnerUI(ctx, cx, cy, r, s) {
   ctx.font = "60px 'MouldyCheese'";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("LUCKY WINNER", 0, -r - 110 + pulse / 2 + (winnerUsername ? 30 : 40));
+  ctx.fillText(
+    "LUCKY WINNER",
+    0,
+    -r - 110 + pulse / 2 + (winnerUsername ? 30 : 40)
+  );
 
   // Display winner username if available
   if (winnerUsername) {
@@ -118,7 +137,10 @@ function drawWinnerUI(ctx, cx, cy, r, s) {
     ctx.textBaseline = "middle";
     // Truncate long usernames
     // Move username down slightly (changed from 80 to 90)
-    const displayName = winnerUsername.length > 20 ? winnerUsername.substring(0, 17) + "..." : winnerUsername;
+    const displayName =
+      winnerUsername.length > 20
+        ? winnerUsername.substring(0, 17) + "..."
+        : winnerUsername;
     ctx.fillText(displayName, 0, -r - 110 + pulse / 2 + 90);
   }
 
@@ -163,7 +185,12 @@ function drawNormalAnswer(ctx, cx, cy, r, s) {
   const numberText = String(s.currentNumber);
 
   // Calculate font size to achieve target text height - MODIFY: Change C.NUMBER_TEXT_HEIGHT in constants.js
-  const fontSize = calculateFontSizeForHeight(ctx, numberText, "MouldyCheese", C.NUMBER_TEXT_HEIGHT);
+  const fontSize = calculateFontSizeForHeight(
+    ctx,
+    numberText,
+    "MouldyCheese",
+    C.NUMBER_TEXT_HEIGHT
+  );
 
   // Set font for the number - font size is calculated to match target height
   ctx.font = `bold ${fontSize}px 'MouldyCheese'`;
@@ -174,7 +201,8 @@ function drawNormalAnswer(ctx, cx, cy, r, s) {
   const textWidth = textMetrics.width;
 
   // Get actual rendered height of text (should be close to C.NUMBER_TEXT_HEIGHT)
-  const actualTextHeight = textMetrics.actualBoundingBoxAscent + textMetrics.actualBoundingBoxDescent;
+  const actualTextHeight =
+    textMetrics.actualBoundingBoxAscent + textMetrics.actualBoundingBoxDescent;
 
   // Padding around the number inside the container
   // MODIFY: Change C.NUMBER_PADDING in constants.js
@@ -203,7 +231,15 @@ function drawNormalAnswer(ctx, cx, cy, r, s) {
   const titleBoxY = numberBoxY - bgHeight / 2 - gap - titleHeight;
 
   // Draw title container background - MODIFY: Change C.TITLE_X, C.TITLE_WIDTH, C.TITLE_HEIGHT, C.TITLE_CORNER_RADIUS, C.TITLE_BG_COLOR in constants.js
-  drawRoundedRect(ctx, C.TITLE_X, titleBoxY, C.TITLE_WIDTH, titleHeight, C.TITLE_CORNER_RADIUS, C.TITLE_BG_COLOR);
+  drawRoundedRect(
+    ctx,
+    C.TITLE_X,
+    titleBoxY,
+    C.TITLE_WIDTH,
+    titleHeight,
+    C.TITLE_CORNER_RADIUS,
+    C.TITLE_BG_COLOR
+  );
 
   // ===== TITLE TEXT SECTION =====
   // Set text color - MODIFY: Change C.TITLE_TEXT_COLOR in constants.js
@@ -221,13 +257,28 @@ function drawNormalAnswer(ctx, cx, cy, r, s) {
   // Draw outer border: positioned outside the inner container
   // MODIFY: Change C.NUMBER_BORDER_THICKNESS and C.NUMBER_OUTER_CORNER_RADIUS in constants.js
   const borderOffset = C.NUMBER_BORDER_THICKNESS;
-  drawRoundedRect(ctx, -bgWidth / 2 - borderOffset, numberBoxY - bgHeight / 2 - borderOffset,
-                  bgWidth + borderOffset * 2, bgHeight + borderOffset * 2, C.NUMBER_OUTER_CORNER_RADIUS, C.NUMBER_BORDER_COLOR);
+  drawRoundedRect(
+    ctx,
+    -bgWidth / 2 - borderOffset,
+    numberBoxY - bgHeight / 2 - borderOffset,
+    bgWidth + borderOffset * 2,
+    bgHeight + borderOffset * 2,
+    C.NUMBER_OUTER_CORNER_RADIUS,
+    C.NUMBER_BORDER_COLOR
+  );
 
   // ===== NUMBER CONTAINER (INNER BACKGROUND - BLACK) =====
   // Draw inner background: exact size of container (no border offset)
   // MODIFY: Change C.NUMBER_INNER_CORNER_RADIUS and C.NUMBER_BG_COLOR in constants.js
-  drawRoundedRect(ctx, -bgWidth / 2, numberBoxY - bgHeight / 2, bgWidth, bgHeight, C.NUMBER_INNER_CORNER_RADIUS, C.NUMBER_BG_COLOR);
+  drawRoundedRect(
+    ctx,
+    -bgWidth / 2,
+    numberBoxY - bgHeight / 2,
+    bgWidth,
+    bgHeight,
+    C.NUMBER_INNER_CORNER_RADIUS,
+    C.NUMBER_BG_COLOR
+  );
 
   // ===== NUMBER TEXT =====
   // Set shadow blur amount - MODIFY: Change C.NUMBER_SHADOW_BLUR in constants.js
@@ -286,15 +337,25 @@ class WheelRotationState {
       if (Math.abs(target - this.visualWheelRotation) < 0.01) {
         this.visualWheelRotation = target;
       }
-    } else if (gameState.status === "finished" || gameState.status === "winner" || gameState.status === "cooldown") {
+    } else if (
+      gameState.status === "finished" ||
+      gameState.status === "winner" ||
+      gameState.status === "cooldown"
+    ) {
       // After spinning stops, LOCK the wheel position - prevent state updates from moving it
       // IMPORTANT: Once locked, use the locked position instead of state.targetRotation
 
       // Detect transition from spinning to finished - lock immediately
-      if (statusChanged && (this.lastStatus === "spinning" || this.lockedWheelRotation === null)) {
+      if (
+        statusChanged &&
+        (this.lastStatus === "spinning" || this.lockedWheelRotation === null)
+      ) {
         // Status just changed to finished OR we don't have a lock yet
         // IMMEDIATELY snap to exact target rotation and lock it
-        if (gameState.targetRotation !== undefined && gameState.targetRotation !== null) {
+        if (
+          gameState.targetRotation !== undefined &&
+          gameState.targetRotation !== null
+        ) {
           this.lockedWheelRotation = gameState.targetRotation;
           this.visualWheelRotation = this.lockedWheelRotation; // Snap immediately, no lerp
         } else if (this.visualWheelRotation !== undefined) {
@@ -477,7 +538,15 @@ function drawWheelAndUI(ctx, gameState, rotationState) {
   for (let i = 0; i < slices; i++) {
     const angle = (i * 2 * Math.PI) / slices;
     // Draw wheel slice - MODIFY: Change colors "#FFD700" (gold) and "#1A1A1A" (dark) to change slice colors
-    drawSector(ctx, 0, 0, r, angle, angle + (2 * Math.PI) / slices, i % 2 ? "#FFD700" : "#1A1A1A");
+    drawSector(
+      ctx,
+      0,
+      0,
+      r,
+      angle,
+      angle + (2 * Math.PI) / slices,
+      i % 2 ? "#FFD700" : "#1A1A1A"
+    );
   }
 
   // Draw numbers UPRIGHT (not rotated) for easier reading
@@ -513,14 +582,23 @@ function drawWheelAndUI(ctx, gameState, rotationState) {
 
   // Draw pointer triangle - MODIFY: Change "#FF3B30" (red) to change pointer color, adjust coordinates to change position/size
   // Pointer is drawn in world coordinates (not rotated)
-  drawTriangle(ctx, cx, cy - r + 5, cx - 30, cy - r - 45, cx + 30, cy - r - 45, "#FF3B30");
+  drawTriangle(
+    ctx,
+    cx,
+    cy - r + 5,
+    cx - 30,
+    cy - r - 45,
+    cx + 30,
+    cy - r - 45,
+    "#FF3B30"
+  );
 
   if (gameState.status === "waiting" || gameState.status === "cooldown") {
-    // Increased spacing from bottom edge for mobile keyboard visibility
-    // Changed from HEIGHT - 100 to HEIGHT - 200 to keep status visible when keyboard appears
-    const barY = HEIGHT - 200;
+    // Use safe margins for positioning - bottom margin of 300px for mobile keyboard
+    const barY = HEIGHT - 300 + 100; // 100px above the bottom safe margin
     const remainingMs = Math.max(0, (gameState.timerEnd || 0) - Date.now());
-    const total = gameState.status === "waiting" ? C.WAITING_DURATION : C.COOLDOWN_DURATION;
+    const total =
+      gameState.status === "waiting" ? C.WAITING_DURATION : C.COOLDOWN_DURATION;
     const remainingSeconds = Math.ceil(remainingMs / 1000);
 
     ctx.fillStyle = "white";
@@ -530,16 +608,31 @@ function drawWheelAndUI(ctx, gameState, rotationState) {
     // Show countdown with placeholder replacement
     // MODIFY: Change C.READY_TO_SPIN_TEXT, C.NEXT_ROUND_STARTING_TEXT, and C.TIME_UNIT_SUFFIX in constants.js
     // Available placeholders: {seconds}, {countdown}, {unit}
-    let statusText = gameState.status === "waiting" ? C.READY_TO_SPIN_TEXT : C.NEXT_ROUND_STARTING_TEXT;
+    let statusText =
+      gameState.status === "waiting"
+        ? C.READY_TO_SPIN_TEXT
+        : C.NEXT_ROUND_STARTING_TEXT;
     // Replace placeholders with actual values
     statusText = statusText.replace(/{seconds}/g, remainingSeconds.toString());
-    statusText = statusText.replace(/{countdown}/g, remainingSeconds.toString());
+    statusText = statusText.replace(
+      /{countdown}/g,
+      remainingSeconds.toString()
+    );
     statusText = statusText.replace(/{unit}/g, C.TIME_UNIT_SUFFIX);
     ctx.fillText(statusText, cx, barY - 60);
 
     // Draw progress bar - MODIFY: Change colors and dimensions to customize progress bar appearance
     const progress = remainingMs / total;
-    drawProgressBar(ctx, cx, barY, 500, 20, progress, "rgba(0,0,0,0.5)", "#FFD700");
+    drawProgressBar(
+      ctx,
+      cx,
+      barY,
+      500,
+      20,
+      progress,
+      "rgba(0,0,0,0.5)",
+      "#FFD700"
+    );
   }
 
   // Show answer as soon as currentNumber is set (no delay)
@@ -549,7 +642,8 @@ function drawWheelAndUI(ctx, gameState, rotationState) {
   // This ensures the number appears as soon as it's calculated, even if status is still "spinning"
   if (gameState.currentNumber !== null && gameState.status !== "waiting") {
     const hasWinner = gameState.winners && gameState.winners.length > 0;
-    const celebrationActive = gameState.celebration && gameState.celebration.active;
+    const celebrationActive =
+      gameState.celebration && gameState.celebration.active;
 
     if (hasWinner && celebrationActive) {
       // Show celebration for winners (above wheel, doesn't affect wheel size)
@@ -581,8 +675,8 @@ function drawLeaderboard(ctx, players, animationState = null) {
   }
   // Increased width and moved further left for more space
   const lbWidth = 700; // Increased from 600 to 700
-  const lbX = WIDTH - lbWidth - 40; // Moved left (reduced right margin from 100 to 40)
-  const lbY = 220; // Moved down from 180 to 220 to prevent mobile keyboard cropping
+  const lbX = WIDTH - lbWidth - 40; // Respect right margin for safe area
+  const lbY = 40; // Respect top margin for safe area
 
   // Draw leaderboard background - MODIFY: Change colors and dimensions to customize leaderboard appearance
   // Reduced height from 650 to 600 to prevent cropping when mobile keyboard appears
@@ -595,7 +689,9 @@ function drawLeaderboard(ctx, players, animationState = null) {
 
   // Calculate max score for proportional bar scaling
   // Handle empty players array
-  const playerScores = sortedPlayers.slice(0, 10).map((p) => p.wins || p.score || 0);
+  const playerScores = sortedPlayers
+    .slice(0, 10)
+    .map((p) => p.wins || p.score || 0);
   const maxScore = playerScores.length > 0 ? Math.max(1, ...playerScores) : 1;
 
   // Score bar dimensions - adjusted for wider leaderboard
@@ -624,7 +720,8 @@ function drawLeaderboard(ctx, players, animationState = null) {
     ctx.textAlign = "left";
     // Truncate username to 15 characters with ellipses
     const fullName = String(player.username || "Anonymous");
-    const name = fullName.length > 15 ? fullName.substring(0, 15) + "..." : fullName;
+    const name =
+      fullName.length > 15 ? fullName.substring(0, 15) + "..." : fullName;
     ctx.fillText(`${i === 0 ? "👑 " : i + 1 + ". "}${name}`, lbX + 40, rowY);
 
     // Draw score bar background (subtle gray) - only if barWidth is valid
@@ -635,14 +732,23 @@ function drawLeaderboard(ctx, players, animationState = null) {
       const barX = scoreStartX - barWidth; // Start from right, extend left
 
       // Draw background bar (right-aligned)
-      drawRoundedRect(ctx, barX, barY, barWidth, barHeight, 4, "rgba(255, 255, 255, 0.1)");
+      drawRoundedRect(
+        ctx,
+        barX,
+        barY,
+        barWidth,
+        barHeight,
+        4,
+        "rgba(255, 255, 255, 0.1)"
+      );
 
       // Draw score bar fill (proportional to score, right-aligned)
       if (barFillWidth > 0) {
         // Use light green for highest scorer, gray for others
-        const barColor = i === 0 && score === maxScore
-          ? "#66BB6A" // Light green for highest scorer
-          : "#9E9E9E"; // Gray for others
+        const barColor =
+          i === 0 && score === maxScore
+            ? "#66BB6A" // Light green for highest scorer
+            : "#9E9E9E"; // Gray for others
 
         // Right-align the fill: start from scoreStartX and extend leftward
         const fillX = scoreStartX - barFillWidth;
@@ -653,9 +759,10 @@ function drawLeaderboard(ctx, players, animationState = null) {
     // Draw score number - use green for highest scorer, gray for others
     ctx.textAlign = "right";
     // Use light green for highest scorer, gray for others (only for score text)
-    ctx.fillStyle = i === 0 && score === maxScore
-      ? "#66BB6A" // Light green for highest scorer
-      : "#9E9E9E"; // Gray for others
+    ctx.fillStyle =
+      i === 0 && score === maxScore
+        ? "#66BB6A" // Light green for highest scorer
+        : "#9E9E9E"; // Gray for others
     ctx.fillText(String(score), lbX + lbWidth - 40, rowY);
     ctx.textAlign = "left";
   });
@@ -670,18 +777,26 @@ function drawLeaderboard(ctx, players, animationState = null) {
 function drawFPSCounter(ctx, fpsState) {
   const now = Date.now();
   const dt = now - (fpsState.lastFrameTime || now);
-  fpsState.currentFPS = (fpsState.currentFPS || 30) * 0.9 + (1000 / Math.max(dt, 1)) * 0.1;
+  fpsState.currentFPS =
+    (fpsState.currentFPS || 30) * 0.9 + (1000 / Math.max(dt, 1)) * 0.1;
   fpsState.lastFrameTime = now;
 
   // FPS counter container dimensions
-  // Moved higher up to avoid mobile keyboard overlap
+  // Respect safe margins
   const fpsBoxX = WIDTH - 250;
-  const fpsBoxY = HEIGHT - 180; // Changed from HEIGHT - 80 to HEIGHT - 180 for mobile spacing
+  const fpsBoxY = HEIGHT - 300 + 20; // Respect bottom margin with 20px offset
   const fpsBoxWidth = 220;
   const fpsBoxHeight = 60;
 
   // Draw FPS counter background - MODIFY: Change color and dimensions to customize FPS display
-  drawRect(ctx, fpsBoxX, fpsBoxY, fpsBoxWidth, fpsBoxHeight, "rgba(0, 0, 0, 0.8)");
+  drawRect(
+    ctx,
+    fpsBoxX,
+    fpsBoxY,
+    fpsBoxWidth,
+    fpsBoxHeight,
+    "rgba(0, 0, 0, 0.8)"
+  );
 
   // Set text style
   ctx.fillStyle = fpsState.currentFPS < 25 ? "#FF3B30" : "#4CD964";
@@ -704,14 +819,14 @@ function drawFPSCounter(ctx, fpsState) {
  */
 function drawLogoAndBrand(ctx, logoImage) {
   // --- UI Group: Title & Logo (Aligned above Leaderboard) ---
-  // Moved down to prevent cropping when mobile keyboard appears in YouTube live
+  // Respect safe margins
   const rightAnchor = WIDTH - 560; // Matches the Leaderboard X position
 
   // 1. Draw Logo (centered vertically)
-  // Moved down from 40 to 60 to prevent mobile keyboard cropping
-  const logoY = 60;
+  // Respect top margin for safe area
+  const logoY = 40; // Use top margin
   const logoHeight = 120;
-  const logoCenterY = logoY + logoHeight / 2; // Center of logo at y=120
+  const logoCenterY = logoY + logoHeight / 2; // Center of logo at y=100
   if (logoImage) {
     ctx.drawImage(logoImage, rightAnchor, logoY, 120, logoHeight);
   }
@@ -724,6 +839,9 @@ function drawLogoAndBrand(ctx, logoImage) {
   // Positioned to the right of the logo, vertically centered with logo
   ctx.fillText("TOPIX99", rightAnchor + 140, logoCenterY);
 }
+
+// Legacy renderer - kept for backward compatibility
+// The new template system is in template-renderer.js
 
 module.exports = {
   // Constants

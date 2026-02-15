@@ -19,8 +19,8 @@ const {
   LeaderboardAnimationState,
 } = require('./renderer');
 
-// Set test mode environment variable to ensure test Redis keys are used
-process.env.TEST_MODE = "true";
+// Set up test mode environment - moved into start()
+// process.env.TEST_MODE = "true";
 
 const app = express();
 app.use(express.json()); // Parse JSON bodies
@@ -64,6 +64,7 @@ const syncData = async () => {
 };
 
 async function start() {
+  process.env.TEST_MODE = "true";
   try {
     await connectRedis();
     logger.info("Redis connected for test mode");

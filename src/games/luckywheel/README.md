@@ -1,101 +1,42 @@
-# Lucky Wheel Game Module
+# Lucky Wheel - YouTube Edition
 
-This directory contains the complete Lucky Wheel game implementation, organized by concern.
+An interactive, chat-integrated "Spin the Wheel" game designed for YouTube Live. Viewers compete in real-time by guessing where the wheel will land.
 
-## File Structure
+## 📺 YouTube Gameplay
 
-### Core Game Logic
-- **`game.js`** - Main game class with game logic only:
-  - Game state machine (waiting → spinning → winner → cooldown)
-  - Round management
-  - Chat message processing
-  - Winner calculation coordination
-  - **NO rendering, NO streaming, NO state persistence** - pure game logic
+### How to Join
+1. **Waiting Phase**: When the screen shows "READY TO SPIN", the guessing period begins (10 seconds).
+2. **Submit Guess**: Type any number that appears on the wheel (e.g., `10`, `50`, `100`) in the YouTube chat.
+3. **The Spin**: The wheel spins automatically for 7 seconds.
+4. **Victory**: If the wheel stops on your guessed number, you win points!
 
-### Supporting Modules
+### Rules
+- **Max Guesses**: You can submit up to 5 different guesses per round.
+- **Scoring**:
+  - 1 correct guess out of 1 total = **10 points**.
+  - 1 correct guess out of 5 total = **1 point**.
+  - *Strategy Tip*: Being precise with fewer guesses yields much higher scores.
 
-- **`logic.js`** - Winner calculation logic (pure functions)
-- **`constants.js`** - Game constants and configuration
-- **`state.js`** - State persistence layer (Redis integration)
-  - Handles saving/loading game state
-  - Manages leaderboard
-  - **Separated from game logic**
+## 🛠️ Technical Details
 
-### Rendering & Streaming
+### Game Logic
+- **File**: `game.js` - Manages the state machine (Waiting → Spinning → Reveal → Cooldown).
+- **Physics**: Uses a mathematical easing function to simulate natural wheel deceleration.
+- **State Management**: Persists scores and game state in Redis.
 
-- **`renderer.js`** - Canvas rendering functions
-  - Drawing wheel, UI, leaderboard
-  - Visual effects and animations
-  - **Separated from game logic**
+### Rendering
+- **File**: `renderer.js` - Handles the canvas-based rendering of the wheel, pointer, and background effects.
+- **Assets**: Uses high-resolution textures and font rendering for a premium "neon" look.
 
-- **`live.js`** - Live streaming setup
-  - Integrates YouTubeStreamer
-  - Connects game state to rendering
-  - **Separated from game logic**
-
-- **`test.js`** - Test mode setup
-  - Local browser-based testing
-  - HTTP server for test UI
-  - **Separated from game logic**
-
-### Module Exports
-
-- **`index.js`** - Main entry point
-  - Exports GameClass, renderer, startLive, startTest, config
-  - Used by game registry
-
-## Separation of Concerns
-
-✅ **`game.js`** = Pure game logic only
-- State transitions
-- Round management
-- Chat processing
-- Winner coordination
-
-❌ **`game.js`** does NOT contain:
-- Rendering/visual code (in `renderer.js`)
-- Streaming setup (in `live.js`)
-- State persistence (in `state.js`)
-- Winner calculation (in `logic.js`)
-
-## Usage
-
-```javascript
-// Get game instance (pure logic)
-const game = require('./game');
-
-// Start a new round
-await game.startNewRound();
-
-// Process chat message
-await game.processChatMessage(userId, username, message);
-
-// Get current state
-const state = game.getStateSync();
+### Local Testing
+To test the Lucky Wheel implementation without going live:
+```bash
+npm run game:luckywheel:test
 ```
+Visit `http://localhost:3001` to see the virtual stream.
 
-## Architecture
+## 📊 Leaderboard
+Scores are persistent and updated instantly. The top 5 players are displayed on the right sidebar during the live stream.
 
-```
-game.js (Logic)
-    ↓ uses
-state.js (Persistence)
-    ↓ uses
-logic.js (Calculations)
-    ↓ uses
-constants.js (Config)
-
-renderer.js (Visual)
-    ↓ uses
-game.js state (Read-only)
-
-live.js (Streaming)
-    ↓ uses
-game.js + renderer.js
-```
-
-This separation allows:
-- Game logic to be tested independently
-- Rendering to be swapped/changed without affecting logic
-- State persistence to be changed (Redis → Database) without affecting logic
-- Easy to add new games following the same pattern
+---
+*Powered by Topix99 Game Engine*

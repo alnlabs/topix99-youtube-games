@@ -69,6 +69,8 @@ class YouTubeStreamer {
       lastSyncError: 0,
       lastFrameError: 0,
     };
+    this.frameCount = 0;
+    this.lastLogTime = 0;
 
     // Bind methods
     this.stop = this.stop.bind(this);
@@ -95,7 +97,10 @@ class YouTubeStreamer {
       // Start state synchronization if provided
       if (this.config.syncState) {
         await this._syncState();
-        this.syncInterval = setInterval(() => this._syncState(), this.config.syncInterval);
+        this.syncInterval = setInterval(
+          () => this._syncState(),
+          this.config.syncInterval
+        );
       }
 
       // Start FFmpeg process
@@ -170,50 +175,76 @@ class YouTubeStreamer {
    * @private
    */
   _startFFmpeg() {
+    const width = this.config.width;
+    const height = this.config.height;
+    const fps = this.config.fps;
+
     const ffmpegArgs = [
       "-loglevel",
-      "error",
+      "info",
+
+      "-re", // Read input at native frame rate (crucial for real-time pipes)
+
+      // ===== INPUT (Raw canvas frames) =====
       "-f",
       "rawvideo",
       "-pixel_format",
       "bgra",
       "-video_size",
-      `${this.config.width}x${this.config.height}`,
+      `${width}x${height}`,
       "-framerate",
-      `${this.config.fps}`,
+      `${fps}`,
+      "-thread_queue_size",
+      "512",
       "-i",
       "pipe:0",
     ];
 
-    // Add background music if provided
+    // ===== OPTIONAL BACKGROUND MUSIC =====
     if (this.config.bgmPath) {
       ffmpegArgs.push(
         "-stream_loop",
         "-1",
+        "-thread_queue_size",
+        "512",
         "-i",
         this.config.bgmPath
       );
     }
 
-    // Video encoding options
+    // ===== VIDEO ENCODING (1080p Stable) =====
     ffmpegArgs.push(
       "-c:v",
-      "libx264",
+      this.config.ffmpegOptions.videoEncoder || "libx264",
       "-preset",
       this.config.ffmpegOptions.preset || "veryfast",
-      "-b:v",
-      this.config.ffmpegOptions.videoBitrate || "4500k",
-      "-maxrate",
-      this.config.ffmpegOptions.maxBitrate || "4500k",
-      "-bufsize",
-      this.config.ffmpegOptions.bufsize || "9000k",
       "-tune",
       this.config.ffmpegOptions.tune || "zerolatency",
+
+      // Stable bitrate for 1080p
+      "-b:v",
+      this.config.ffmpegOptions.videoBitrate || "4200k",
+      "-maxrate",
+      this.config.ffmpegOptions.maxBitrate || "4200k",
+      "-bufsize",
+      this.config.ffmpegOptions.bufsize || "8400k",
+
+      // Strict 2-second keyframe interval
       "-g",
-      this.config.ffmpegOptions.gop || "60"
+      this.config.ffmpegOptions.gop || `${fps * 2}`,
+      "-keyint_min",
+      `${fps * 2}`,
+      "-sc_threshold",
+      "0",
+
+      // High profile for YouTube
+      "-profile:v",
+      "high",
+      "-pix_fmt",
+      "yuv420p"
     );
 
-    // Audio encoding options (if bgm is provided)
+    // ===== AUDIO ENCODING =====
     if (this.config.bgmPath) {
       ffmpegArgs.push(
         "-c:a",
@@ -221,7 +252,7 @@ class YouTubeStreamer {
         "-b:a",
         this.config.ffmpegOptions.audioBitrate || "128k",
         "-ar",
-        this.config.ffmpegOptions.sampleRate || "44100",
+        "44100",
         "-map",
         "0:v:0",
         "-map",
@@ -229,32 +260,23 @@ class YouTubeStreamer {
       );
     }
 
-    // Output format
-    ffmpegArgs.push(
-      "-pix_fmt",
-      "yuv420p",
-      "-f",
-      "flv",
-      this.config.rtmpUrl
-    );
-
-    // Merge any additional custom FFmpeg options
-    if (this.config.ffmpegOptions.extraArgs) {
-      ffmpegArgs.push(...this.config.ffmpegOptions.extraArgs);
-    }
+    // ===== OUTPUT =====
+    ffmpegArgs.push("-f", "flv", "-rtmp_live", "live", this.config.rtmpUrl);
 
     this.ffmpegInstance = spawn("ffmpeg", ffmpegArgs);
 
-    // Setup event handlers
     this.ffmpegInstance.on("close", this._handleFFmpegClose);
     this.ffmpegInstance.on("error", this._handleFFmpegError);
     this.ffmpegInstance.stdin.on("error", this._handleStdinError);
 
-    // Handle FFmpeg stderr for debugging
     this.ffmpegInstance.stderr.on("data", (data) => {
       const message = data.toString();
-      if (message.toLowerCase().includes("error")) {
-        logger.error(`[streamer] FFmpeg: ${message.trim()}`);
+      this.lastFFmpegErrors = (this.lastFFmpegErrors || []).concat(message.split("\n")).slice(-20);
+      if (message.includes("Error") || message.includes("error") || message.includes("fatal")) {
+        logger.error(`[streamer] FFmpeg Error: ${message.trim()}`);
+      } else if (this.frameCount % 500 === 0) {
+        // Log general info less frequently to avoid flooding
+        logger.info(`[streamer] FFmpeg: ${message.trim()}`);
       }
     });
   }
@@ -274,7 +296,10 @@ class YouTubeStreamer {
     } catch (error) {
       // Throttle error logging
       const now = Date.now();
-      if (!this.errorThrottle.lastSyncError || now - this.errorThrottle.lastSyncError > 5000) {
+      if (
+        !this.errorThrottle.lastSyncError ||
+        now - this.errorThrottle.lastSyncError > 5000
+      ) {
         logger.error(`[streamer] Sync error: ${error.message}`);
         this.errorThrottle.lastSyncError = now;
       }
@@ -306,7 +331,10 @@ class YouTubeStreamer {
     } catch (error) {
       // Throttle error logging
       const now = Date.now();
-      if (!this.errorThrottle.lastFrameError || now - this.errorThrottle.lastFrameError > 5000) {
+      if (
+        !this.errorThrottle.lastFrameError ||
+        now - this.errorThrottle.lastFrameError > 5000
+      ) {
         logger.error(`[streamer] Render error: ${error.message}`);
         this.errorThrottle.lastFrameError = now;
       }
@@ -324,6 +352,19 @@ class YouTubeStreamer {
           const buffer = this.canvas.toBuffer("raw");
           const writeResult = this.ffmpegInstance.stdin.write(buffer);
 
+          // Performance Logging (every 100 frames)
+          this.frameCount++;
+          if (this.frameCount % 100 === 0) {
+            const now = Date.now();
+            if (this.lastLogTime) {
+              const elapsed = (now - this.lastLogTime) / 1000;
+              const actualFps = (100 / elapsed).toFixed(1);
+              const speed = (actualFps / this.config.fps).toFixed(2);
+              logger.info(`[streamer] Performance: ${actualFps} FPS (${speed}x speed)`);
+            }
+            this.lastLogTime = now;
+          }
+
           // Handle backpressure
           if (!writeResult) {
             this.isRenderingPaused = true;
@@ -340,7 +381,9 @@ class YouTubeStreamer {
             error.code === "ECONNRESET" ||
             error.code === "EINVAL"
           ) {
-            logger.error(`[streamer] FFmpeg pipe error (${error.code}), stopping render loop`);
+            logger.error(
+              `[streamer] FFmpeg pipe error (${error.code}), stopping render loop`
+            );
             this.ffmpegInstance = null;
             if (this.syncInterval) {
               clearInterval(this.syncInterval);
@@ -350,13 +393,20 @@ class YouTubeStreamer {
           }
           // Log other errors (throttled)
           const now = Date.now();
-          if (!this.errorThrottle.lastFrameError || now - this.errorThrottle.lastFrameError > 5000) {
-            logger.error(`[streamer] Failed to write frame: ${error.message} (${error.code})`);
+          if (
+            !this.errorThrottle.lastFrameError ||
+            now - this.errorThrottle.lastFrameError > 5000
+          ) {
+            logger.error(
+              `[streamer] Failed to write frame: ${error.message} (${error.code})`
+            );
             this.errorThrottle.lastFrameError = now;
           }
         }
       } else {
-        logger.error("[streamer] FFmpeg stdin not writable, stopping render loop");
+        logger.error(
+          "[streamer] FFmpeg stdin not writable, stopping render loop"
+        );
         this.ffmpegInstance = null;
         if (this.syncInterval) {
           clearInterval(this.syncInterval);
@@ -365,7 +415,9 @@ class YouTubeStreamer {
         return;
       }
     } else {
-      logger.error("[streamer] FFmpeg stdin not available, stopping render loop");
+      logger.error(
+        "[streamer] FFmpeg stdin not available, stopping render loop"
+      );
       if (this.syncInterval) {
         clearInterval(this.syncInterval);
       }
@@ -373,10 +425,11 @@ class YouTubeStreamer {
       return;
     }
 
-    // Schedule next frame
-    const frameTime = Date.now() - startTime;
-    const nextFrameIn = Math.max(1, 1000 / this.config.fps - frameTime);
-    setTimeout(() => this._render(), nextFrameIn);
+    // Schedule next frame with precise timing
+    const elapsedMs = Date.now() - startTime;
+    const targetMs = 1000 / this.config.fps;
+    const delay = Math.max(1, targetMs - elapsedMs);
+    setTimeout(() => this._render(), delay);
   }
 
   /**
@@ -384,7 +437,15 @@ class YouTubeStreamer {
    * @private
    */
   _handleFFmpegClose(code) {
-    logger.error(`[streamer] FFmpeg process exited with code ${code}`);
+    if (code !== 0 && code !== null) {
+      logger.error(`[streamer] FFmpeg process exited with code ${code}`);
+      if (this.lastFFmpegErrors && this.lastFFmpegErrors.length > 0) {
+        logger.error(`[streamer] Last FFmpeg output:\n${this.lastFFmpegErrors.join("\n")}`);
+      }
+    } else {
+      logger.info(`[streamer] FFmpeg process exited with code ${code}`);
+    }
+
     this.ffmpegInstance = null;
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
@@ -416,7 +477,9 @@ class YouTubeStreamer {
       error.code !== "ECONNRESET" &&
       error.code !== "EINVAL"
     ) {
-      logger.error(`[streamer] FFmpeg stdin error: ${error.message} (${error.code})`);
+      logger.error(
+        `[streamer] FFmpeg stdin error: ${error.message} (${error.code})`
+      );
     }
     this.ffmpegInstance = null;
     if (this.syncInterval) {
