@@ -12,65 +12,107 @@ const { hslAlpha, drawNeonRect, easeOutQuad, drawMultilingualText } = require(".
 const Background = {
   staticCanvas: null,
   staticCtx: null,
+  particles: [],
+  stars: [],
 
   init(ctx) {
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
 
-    this.staticCanvas = createCanvas(w, h);
-    this.staticCtx = this.staticCanvas.getContext("2d");
-
-    // Pre-render Static Background
-    const grad = this.staticCtx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w);
-    grad.addColorStop(0, "hsl(230, 30%, 15%)");
-    grad.addColorStop(1, COLORS.BACKGROUND);
-    this.staticCtx.fillStyle = grad;
-    this.staticCtx.fillRect(0, 0, w, h);
-
-    // Pre-render Stars (Static)
-    this.staticCtx.fillStyle = "white";
-    for(let i=0; i<40; i++) {
-        const x = Math.random() * w;
-        const y = Math.random() * h;
-        const size = Math.random() * 1.5 + 0.5;
-        this.staticCtx.globalAlpha = Math.random() * 0.7 + 0.3;
-        this.staticCtx.beginPath();
-        this.staticCtx.arc(x, y, size, 0, Math.PI * 2);
-        this.staticCtx.fill();
-    }
-    this.staticCtx.globalAlpha = 1.0;
-
-    this.particles = Array.from({ length: 5 }, () => ({
+    this.particles = Array.from({ length: 4 }, () => ({
       x: Math.random() * w,
       y: Math.random() * h,
-      size: Math.random() * 20 + 10,
-      vx: (Math.random() - 0.5) * 0.2,
-      vy: -Math.random() * 0.1 - 0.05,
-      opacity: 0.08,
+      size: Math.random() * 40 + 20,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
+      opacity: 0.05,
       color: "200, 210, 255",
       pulseSpeed: 0.001,
       pulseOffset: Math.random() * Math.PI * 2,
     }));
+
+    this.stars = Array.from({ length: 60 }, () => ({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      size: Math.random() * 1.5 + 0.5,
+      opacity: Math.random() * 0.7 + 0.3,
+      twinkleSpeed: Math.random() * 0.002 + 0.001,
+      twinkleOffset: Math.random() * Math.PI * 2,
+    }));
+  },
+
+  drawHexGrid(ctx, t, w, h) {
+    const scale = 50;
+    const hexH = scale * Math.sqrt(3);
+    const cols = Math.ceil(w / (scale * 1.5)) + 2;
+    const rows = Math.ceil(h / hexH) + 2;
+    const offsetX = (t * 0.01) % (scale * 3);
+
+    ctx.save();
+    ctx.strokeStyle = `rgba(100, 150, 255, 0.08)`;
+    ctx.lineWidth = 1;
+
+    for (let col = -1; col < cols; col++) {
+      for (let row = -1; row < rows; row++) {
+        const cx = col * scale * 1.5 + offsetX;
+        const cy = row * hexH + (col % 2 === 0 ? 0 : hexH / 2);
+        const pulse = Math.sin(t * 0.001 + col * 0.3 + row * 0.3) * 0.5 + 0.5;
+        const r = scale * 0.5 * (0.8 + pulse * 0.2);
+
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 6;
+          const px = cx + r * Math.cos(angle);
+          const py = cy + r * Math.sin(angle);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   },
 
   render(ctx, timestamp) {
-    if (!this.staticCanvas) this.init(ctx);
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
+    if (!this.stars.length) this.init(ctx);
 
-    // 1. Draw Cached Static Background
-    ctx.drawImage(this.staticCanvas, 0, 0);
+    // 1. Dynamic Radial Gradient (Shifts slightly)
+    const cx = w * 0.5 + Math.sin(timestamp * 0.0001) * w * 0.1;
+    const cy = h * 0.5 + Math.cos(timestamp * 0.0001) * h * 0.1;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, w);
+    grad.addColorStop(0, "hsl(230, 30%, 15%)");
+    grad.addColorStop(1, COLORS.BACKGROUND);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
 
-    // 2. Dynamic Particles
+    // 2. Hex Grid Pattern
+    this.drawHexGrid(ctx, timestamp, w, h);
+
+    // 3. Twinkling Stars
+    ctx.fillStyle = "white";
+    this.stars.forEach(s => {
+      const twinkle = Math.sin(timestamp * s.twinkleSpeed + s.twinkleOffset) * 0.5 + 0.5;
+      ctx.globalAlpha = s.opacity * (0.4 + twinkle * 0.6);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1.0;
+
+    // 4. Moving Particles
     this.particles.forEach(p => {
       p.x += p.vx; p.y += p.vy;
       if (p.x < -p.size) p.x = w + p.size;
       if (p.x > w + p.size) p.x = -p.size;
       if (p.y < -p.size) p.y = h + p.size;
+      if (p.y > h + p.size) p.y = -p.size;
 
       const pulse = Math.sin(timestamp * p.pulseSpeed + p.pulseOffset) * 0.5 + 0.5;
       const alpha = p.opacity * (0.5 + pulse * 0.5);
-      const radius = p.size * (0.8 + pulse * 0.2);
+      const radius = p.size * (1 + pulse * 0.2);
 
       const pGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
       pGrad.addColorStop(0, `rgba(${p.color}, ${alpha})`);
@@ -108,7 +150,7 @@ const Timer = {
 
     ctx.strokeStyle = isUrgent ? COLORS.NEON_PINK : COLORS.NEON_BLUE;
     ctx.lineCap = "round";
-    ctx.shadowColor = ctx.strokeStyle;
+    // Shadow removed for performance
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, -Math.PI / 2, endAngle);
     ctx.stroke();
@@ -230,8 +272,13 @@ const List = {
 
       ctx.fillStyle = COLORS.FOREGROUND;
       const name = item.playerName || item.username || item.name || "";
-      if (name) {
-          ctx.fillText(name, x + 40, iy);
+      let displayName = name;
+      // Truncate to max 15 chars
+      if (displayName.length > 15) {
+        displayName = displayName.substring(0, 15) + "...";
+      }
+      if (displayName) {
+          ctx.fillText(displayName, x + 40, iy);
           ctx.textAlign = "right";
           ctx.fillStyle = COLORS.NEON_YELLOW;
           ctx.fillText(item.score?.toString() || "0", x + w - 15, iy);
@@ -257,7 +304,7 @@ const Celebration = {
       COLORS.NEON_ORANGE,
     ];
 
-    this.confetti = Array.from({ length: 80 }, (_, i) => ({
+    this.confetti = Array.from({ length: 40 }, (_, i) => ({
       x: Math.random() * ctx.canvas.width,
       y: -20,
       size: 8 + Math.random() * 8,
@@ -272,7 +319,7 @@ const Celebration = {
   },
 
   render(ctx, data, timestamp) {
-    const { winnerName, winnerAvatar, isVisible } = data;
+    const { winnerName, winnerAvatar, isVisible, startTime, duration } = data;
     if (!isVisible) {
       this.confetti = [];
       return;
@@ -322,9 +369,7 @@ const Celebration = {
 
     // Pulse effect
     const pulse = Math.sin(timestamp * 0.005) * 0.05 + 1;
-    const glow = 20 + Math.sin(timestamp * 0.005) * 10;
-
-    drawNeonRect(ctx, cardX, cardY, cardW, cardH, 24, COLORS.NEON_PINK, "rgba(5, 5, 20, 0.95)", glow);
+    drawNeonRect(ctx, cardX, cardY, cardW, cardH, 24, COLORS.NEON_PINK, "rgba(5, 5, 20, 0.95)", 20);
 
     // Avatar with pulse
     ctx.save();
@@ -340,21 +385,26 @@ const Celebration = {
     ctx.font = `bold ${TYPOGRAPHY.SIZE_TITLE}px ${TYPOGRAPHY.FONT_TITLE}`;
     ctx.fillStyle = COLORS.FOREGROUND;
     ctx.textAlign = "center";
-    ctx.shadowColor = COLORS.NEON_PINK;
-    ctx.shadowBlur = 15;
-    ctx.fillText(winnerName || "WINNER!", w / 2, cardY + 260);
+    let winnerDisplayName = winnerName || "WINNER!";
+    if (winnerDisplayName.length > 15) {
+      winnerDisplayName = winnerDisplayName.substring(0, 15) + "...";
+    }
+    // Shadow removed for performance
+    ctx.fillText(winnerDisplayName, w / 2, cardY + 260);
 
     // Points
     ctx.font = `bold ${TYPOGRAPHY.SIZE_SUBTITLE}px ${TYPOGRAPHY.FONT_TITLE}`;
     ctx.fillStyle = COLORS.NEON_YELLOW;
     ctx.fillText("+100 POINTS!", w / 2, cardY + 330);
 
-    // Progress Bar (Decoration)
+
     const barWidth = 400;
     const barHeight = 8;
     const barX = (w - barWidth) / 2;
     const barY = cardY + 380;
-    const progress = (Math.sin(timestamp * 0.003) + 1) / 2;
+    // Calculate linear progress from 0 to 1 over the duration
+    const elapsed = timestamp - (startTime || timestamp);
+    const progress = Math.max(0, Math.min(1, elapsed / (duration || 3000)));
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
     ctx.beginPath();
@@ -362,8 +412,7 @@ const Celebration = {
     ctx.fill();
 
     ctx.fillStyle = COLORS.NEON_BLUE;
-    ctx.shadowColor = COLORS.NEON_BLUE;
-    ctx.shadowBlur = 10;
+    // Shadow removed for performance
     ctx.beginPath();
     ctx.roundRect(barX, barY, barWidth * progress, barHeight, 4);
     ctx.fill();

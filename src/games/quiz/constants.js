@@ -4,9 +4,10 @@
 module.exports = {
   // Game Timing (milliseconds)
   QUESTION_DURATION: 15000, // 15 seconds per question
-  REVEAL_DURATION: 1500, // 1.5 seconds to show answer
-  CELEBRATION_DURATION: 3500, // 3.5 seconds celebration
-  NEXT_QUESTION_DELAY: 500, // 0.5 seconds before next question
+  REVEAL_DURATION: 3000, // 3 seconds to show answer
+  CELEBRATION_DURATION: 3000, // 3 seconds celebration
+  NEXT_QUESTION_DELAY: 2000, // 2 seconds before next question
+
 
   // Scoring
   BASE_SCORE: 100,
@@ -55,5 +56,5 @@ module.exports = {
   // Canvas dimensions
   WIDTH: 1920,
   HEIGHT: 1080,
-  FPS: 25,
+  FPS: 30,
 };

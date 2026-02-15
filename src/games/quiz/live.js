@@ -60,8 +60,8 @@ async function startLive(rtmpUrl, game) {
       const gameState = state.gameState || {};
       const leaderboard = state.leaderboard || [];
 
-      // Pass timestamp for animations
-      renderQuizUI(ctx, gameState, leaderboard, Date.now());
+      // Pass timestamp for animations and template explicitly
+      renderQuizUI(ctx, gameState, leaderboard, Date.now(), template);
     },
   });
 

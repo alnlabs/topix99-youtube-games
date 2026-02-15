@@ -149,6 +149,8 @@ function renderQuizUI(ctx, gameState, leaderboard, timestamp = Date.now(), templ
       winnerName: gameState.winnerUsername,
       winnerAvatar: gameState.winnerAvatar || "🏆",
       isVisible: gameState.status === "celebration",
+      startTime: gameState.celebrationStartTime,
+      duration: gameState.celebrationDuration,
     }, timestamp);
   }
 }
