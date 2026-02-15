@@ -243,18 +243,49 @@ class YTChat {
       (route) => route.abort()
     );
 
+    console.log("[ytchat] Registering network response interceptor...");
     // Intercept YouTube's live chat API responses - FASTEST method
     page.on("response", async (response) => {
       const url = response.url();
-      if (url.includes("/youtubei/v1/live_chat/get_live_chat")) {
+      if (url.includes("/youtubei/v1/live_chat/")) {
+        console.log(`[ytchat] API Intercept: ${url}`);
         try {
           const json = await response.json();
+          const actions = json?.continuationContents?.liveChatContinuation?.actions || json?.contents?.liveChatRenderer?.actions;
+
+          if (actions && actions.length > 0) {
+            console.log(`[ytchat] Intercepted chat actions: ${actions.length}`);
+          } else {
+             console.log(`[ytchat] No actions. JSON Keys: ${Object.keys(json || {}).join(", ")}`);
+             if (!this._dumpedJson) {
+               console.log(`[ytchat] JSON DUMP: ${JSON.stringify(json).substring(0, 2000)}`);
+               this._dumpedJson = true;
+             }
+          }
           this._parseApiResponse(json);
         } catch (e) {
           // Response might not be JSON, ignore
         }
       }
     });
+
+    // BACKUP: Periodic DOM scraping in case network interception fails
+    const pollDom = async () => {
+      if (this.isStopping || this._isRestarting) return;
+      try {
+        const messages = await this._scrapeMessages(this.page).catch(() => []);
+        if (messages.length > 0) {
+          const newCount = this._processScrapedMessages(messages);
+          if (newCount > 0) {
+            console.log(`[ytchat] Polled ${newCount} new messages from DOM`);
+          }
+        }
+      } catch (err) {
+        // Silent error for polling
+      }
+      setTimeout(pollDom, 2000); // Poll every 2 seconds
+    };
+    pollDom();
   }
 
   /**
@@ -347,7 +378,7 @@ class YTChat {
   _processScrapedMessages(messages, afterId = null) {
     let newCount = 0;
     let skippedOld = 0;
-    const messageList = [];
+    let duplicates = 0;
     let foundAfter = !afterId; // If no afterId, process all
 
     for (const { id, author, message } of messages) {
@@ -363,15 +394,20 @@ class YTChat {
 
       // Use messageTracker which properly handles time-based deduplication
       const isNew = this._messageTracker.add(id);
-      if (!isNew) continue;
+      if (!isNew) {
+        duplicates++;
+        continue;
+      }
 
       this._lastProcessedId = id; // Track latest message
-      messageList.push(`${author}:${message}`);
-
       if (this.onMessage) {
         this.onMessage({ author, message, timestamp: Date.now() });
         newCount++;
       }
+    }
+
+    if (messages.length > 0 && (newCount > 0 || duplicates > 0)) {
+        console.log(`[ytchat] Scraped ${messages.length} messages (New: ${newCount}, Duplicates: ${duplicates}, SkippedOld: ${skippedOld})`);
     }
 
     return newCount;
@@ -618,10 +654,8 @@ class YTChat {
    */
   _parseApiResponse(json) {
     try {
-      const actions =
-        json?.continuationContents?.liveChatContinuation?.actions ||
-        json?.contents?.liveChatRenderer?.actions ||
-        [];
+      const chatContinuation = json?.continuationContents?.liveChatContinuation;
+      const actions = chatContinuation?.actions || json?.contents?.liveChatRenderer?.actions || [];
 
       let processedCount = 0;
       let skippedCount = 0;
@@ -629,14 +663,13 @@ class YTChat {
       const messageList = [];
 
       for (const action of actions) {
-        // Track all action types to see if we're missing some
-        const actionType = Object.keys(action)[0];
-
-        // Only handle text messages
-        const item =
-          action?.addChatItemAction?.item?.liveChatTextMessageRenderer;
+        // Text messages are usually in addChatItemAction.item.liveChatTextMessageRenderer
+        // But can also be in addLiveChatTickerItemAction
+        const item = action?.addChatItemAction?.item?.liveChatTextMessageRenderer;
 
         if (!item) {
+          // Check if it's a different type of action we might care about
+          const actionType = Object.keys(action)[0];
           otherActionCount++;
           continue;
         }

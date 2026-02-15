@@ -1,3 +1,5 @@
+// File: src/games/quiz/constants.js
+
 // games/quiz/constants.js
 module.exports = {
   // Game Timing (milliseconds)
@@ -9,7 +11,7 @@ module.exports = {
   // Scoring
   BASE_SCORE: 100,
   BONUS_SCORE_RANGE: 50, // Random bonus between 0-50
-  CORRECT_ANSWER_CHANCE: 0.8, // 80% chance someone answers correctly
+  CORRECT_ANSWER_CHANCE: 1.0, // 100% chance someone answers correctly (if they actually did)
 
   // Leaderboard
   TOP_PLAYERS_COUNT: 5,
@@ -42,11 +44,16 @@ module.exports = {
   TIMER_URGENT_THRESHOLD: 5, // Seconds when timer turns red
 
   // Safe margins for YouTube streaming (mobile keyboard + edges)
-  // These values match config/modes.js for quiz mode
+  // These values match the design system for consistency
   SAFE_MARGINS: {
-    top: 40,    // YouTube title bar
-    bottom: 300, // Mobile keyboard + progress bar
-    left: 40,   // Left edge
-    right: 40,   // Chat overlay
+    top: 26, // YouTube title bar
+    bottom: 200, // Mobile keyboard + progress bar (scaled from 300)
+    left: 26, // Left edge
+    right: 26, // Chat overlay
   },
+
+  // Canvas dimensions
+  WIDTH: 1920,
+  HEIGHT: 1080,
+  FPS: 25,
 };

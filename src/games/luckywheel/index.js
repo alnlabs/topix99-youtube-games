@@ -6,6 +6,8 @@
 
 const GameClass = require("./game");
 const renderer = require("./renderer");
+// Load template renderer to register the template
+require("./template-renderer");
 const startLive = require("./live");
 const startTest = require("./test");
 

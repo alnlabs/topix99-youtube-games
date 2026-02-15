@@ -1,3 +1,5 @@
+// src/entry/server.js
+require("dotenv").config({ path: ".env" });
 /**
  * Main Server Entry Point
  *
@@ -37,6 +39,9 @@ try {
   logger.error(err.message);
   process.exit(1);
 }
+
+console.log("MODE:", process.env.MODE);
+console.log("API:", process.env.TOPIX99_API_TOKEN);
 
 const { mode: MODE, modeConfig } = config;
 const PORT = modeConfig.port;
@@ -94,8 +99,8 @@ async function boot() {
     }
 
     // Clean live database on startup if CLEAN_LIVE_DB is set
-    if (process.env.CLEAN_LIVE_DB === "true" && MODE === "luckywheel") {
-      logger.info("Cleaning live database...");
+    if (process.env.CLEAN_LIVE_DB === "true") {
+      logger.info(`Cleaning live database for mode: ${MODE}...`);
       const state = require(`../games/${MODE}/state`);
       await state.cleanDatabase();
       logger.info("Live database cleaned - all game data and leaderboard reset");
@@ -124,7 +129,7 @@ async function boot() {
     // Start chat
     ytChat = new YTChat(broadcastId);
     await ytChat.start(async ({ author, message }) => {
-      logger.info(`[chat] ${author}: ${message}`);
+      logger.info(`[server-chat] Received from ${author}: "${message}"`);
 
       if (game && typeof game.processChatMessage === "function") {
         try {
@@ -217,7 +222,9 @@ app.get("/health", (req, res) => {
 server = app.listen(PORT, async () => {
   logger.info(`Server listening on port ${PORT}`);
   try {
+    console.log("[SERVER] Starting boot sequence...");
     await boot();
+    console.log("[SERVER] Boot completed successfully!");
     logger.info("Server boot completed successfully");
   } catch (err) {
     logger.error(`Boot failed: ${err.message}`);

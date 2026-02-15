@@ -1,13 +1,26 @@
+// File: src/games/quiz/state.js
+
 const { redisClient } = require("../../services");
 const C = require("./constants");
+
+// Leaderboard cache with TTL (5 seconds)
+let cachedLeaderboardData = [];
+let leaderboardCacheTimestamp = 0;
+const LEADERBOARD_CACHE_TTL = 5000; // 5 seconds
 
 // Determine if we're in test mode or live mode
 const IS_TEST_MODE = process.env.TEST_MODE === "true";
 const GAME_KEY = IS_TEST_MODE ? "game:quiz:test" : "game:quiz";
-const LEADERBOARD_KEY = IS_TEST_MODE ? "leaderboard:quiz:test" : "leaderboard:quiz";
+const LEADERBOARD_KEY = IS_TEST_MODE
+  ? "leaderboard:quiz:test"
+  : "leaderboard:quiz";
 
-console.log(`[quiz-state] Running in ${IS_TEST_MODE ? "TEST" : "LIVE"} mode`);
-console.log(`[quiz-state] Using Redis keys: GAME_KEY="${GAME_KEY}", LEADERBOARD_KEY="${LEADERBOARD_KEY}"`);
+if (IS_TEST_MODE) {
+  console.log(`[quiz-state] Running in TEST mode`);
+  console.log(
+    `[quiz-state] Using Redis keys: GAME_KEY="${GAME_KEY}", LEADERBOARD_KEY="${LEADERBOARD_KEY}"`
+  );
+}
 
 module.exports = {
   gameState: {
@@ -21,6 +34,10 @@ module.exports = {
     recentAnswers: [],
     participants: new Map(), // Track participants and their answers
     usedQuestionIndices: [], // Track which questions have been used in current cycle
+    questionText: "", // Current question text for renderer
+    options: [], // Current options for renderer
+    correctAnswerIndex: 0, // Current correct answer index for renderer
+    winnerUsername: "", // Winner username for celebration
     lastUpdate: 0,
   },
 
@@ -28,6 +45,15 @@ module.exports = {
 
   getStateSync() {
     return this.gameState;
+  },
+
+  safeJsonParse(str, fallback) {
+    if (!str) return fallback;
+    try {
+      return JSON.parse(str);
+    } catch (e) {
+      return str || fallback;
+    }
   },
 
   getLeaderboardSync() {
@@ -38,7 +64,10 @@ module.exports = {
     try {
       // Convert participants Map to array for JSON serialization
       const participantsArray = [];
-      if (this.gameState.participants && this.gameState.participants instanceof Map) {
+      if (
+        this.gameState.participants &&
+        this.gameState.participants instanceof Map
+      ) {
         this.gameState.participants.forEach((value, key) => {
           participantsArray.push({ key, value });
         });
@@ -51,10 +80,20 @@ module.exports = {
         timeLeft: String(this.gameState.timeLeft || 0),
         timerEnd: String(this.gameState.timerEnd || 0),
         winnerId: String(this.gameState.winnerId || ""),
-        selectedAnswerIndex: String(this.gameState.selectedAnswerIndex !== null ? this.gameState.selectedAnswerIndex : ""),
+        selectedAnswerIndex: String(
+          this.gameState.selectedAnswerIndex !== null
+            ? this.gameState.selectedAnswerIndex
+            : ""
+        ),
         participants: JSON.stringify(participantsArray),
-        usedQuestionIndices: JSON.stringify(this.gameState.usedQuestionIndices || []),
+        usedQuestionIndices: JSON.stringify(
+          this.gameState.usedQuestionIndices || []
+        ),
         recentAnswers: JSON.stringify(this.gameState.recentAnswers || []),
+        questionText: JSON.stringify(this.gameState.questionText || ""),
+        options: JSON.stringify(this.gameState.options || []),
+        correctAnswerIndex: String(this.gameState.correctAnswerIndex || 0),
+        winnerUsername: this.gameState.winnerUsername || "",
         lastUpdate: String(Date.now()),
       };
 
@@ -67,46 +106,75 @@ module.exports = {
 
   async load() {
     try {
-      const [data, lbData] = await Promise.all([
-        redisClient.hGetAll(GAME_KEY),
-        redisClient.zRangeWithScores(LEADERBOARD_KEY, 0, C.TOP_PLAYERS_COUNT - 1, {
-          REV: true,
-        }),
-      ]);
+      const data = await redisClient.hGetAll(GAME_KEY);
+
+      // Check if leaderboard cache is still valid
+      const now = Date.now();
+      let lbData;
+
+      if (now - leaderboardCacheTimestamp < LEADERBOARD_CACHE_TTL) {
+        // Use cached data
+        lbData = cachedLeaderboardData;
+      } else {
+        // Fetch fresh data and update cache
+        lbData = await redisClient.zRangeWithScores(
+          LEADERBOARD_KEY,
+          0,
+          C.TOP_PLAYERS_COUNT - 1,
+          {
+            REV: true,
+          }
+        );
+        cachedLeaderboardData = lbData;
+        leaderboardCacheTimestamp = now;
+      }
 
       if (!data || !data.status) return;
 
       this.gameState.round = parseInt(data.round || 0);
       this.gameState.status = data.status;
-      this.gameState.currentQuestionIndex = parseInt(data.currentQuestionIndex || 0);
+      this.gameState.currentQuestionIndex = parseInt(
+        data.currentQuestionIndex || 0
+      );
       this.gameState.timeLeft = parseInt(data.timeLeft || 0);
       this.gameState.timerEnd = parseInt(data.timerEnd || 0);
       this.gameState.winnerId = data.winnerId || null;
-      this.gameState.selectedAnswerIndex = data.selectedAnswerIndex !== undefined && data.selectedAnswerIndex !== ""
-        ? parseInt(data.selectedAnswerIndex)
-        : null;
+      this.gameState.selectedAnswerIndex =
+        data.selectedAnswerIndex !== undefined &&
+        data.selectedAnswerIndex !== ""
+          ? parseInt(data.selectedAnswerIndex)
+          : null;
 
       // Restore used question indices
-      if (data.usedQuestionIndices) {
-        this.gameState.usedQuestionIndices = JSON.parse(data.usedQuestionIndices);
-      } else {
-        this.gameState.usedQuestionIndices = [];
-      }
+      this.gameState.usedQuestionIndices = this.safeJsonParse(
+        data.usedQuestionIndices,
+        []
+      );
 
       // Restore participants Map
       if (data.participants) {
-        const participantsArray = JSON.parse(data.participants);
+        const participantsArray = this.safeJsonParse(data.participants, []);
         this.gameState.participants = new Map();
-        participantsArray.forEach(({ key, value }) => {
-          this.gameState.participants.set(key, value);
-        });
+        if (Array.isArray(participantsArray)) {
+          participantsArray.forEach(({ key, value }) => {
+            this.gameState.participants.set(key, value);
+          });
+        }
       } else {
         this.gameState.participants = new Map();
       }
 
-      if (data.recentAnswers) {
-        this.gameState.recentAnswers = JSON.parse(data.recentAnswers);
-      }
+      this.gameState.recentAnswers = this.safeJsonParse(data.recentAnswers, []);
+
+      const qText = this.safeJsonParse(data.questionText, "");
+      this.gameState.questionText = qText;
+
+      const opts = this.safeJsonParse(data.options, []);
+      this.gameState.options = Array.isArray(opts) ? opts : [];
+      this.gameState.correctAnswerIndex = parseInt(
+        data.correctAnswerIndex || 0
+      );
+      this.gameState.winnerUsername = data.winnerUsername || "";
 
       // Update cached leaderboard
       this.cachedLeaderboard = lbData.map((e) => {
@@ -126,8 +194,14 @@ module.exports = {
 
   async addScore(userId, username, points) {
     try {
-      const key = `${userId}|${username}`;
-      const newScore = await redisClient.zIncrBy(LEADERBOARD_KEY, points, key);
+      // Use lowercase username as the unique key to prevent duplicates
+      const leaderboardKey = (username || userId).toLowerCase().trim();
+      const newScore = await redisClient.zIncrBy(LEADERBOARD_KEY, points, leaderboardKey);
+
+      // Invalidate leaderboard cache since scores have changed
+      cachedLeaderboardData = [];
+      leaderboardCacheTimestamp = 0;
+
       return newScore;
     } catch (err) {
       console.error("[quiz-state] Add Score Error:", err.message);
@@ -139,6 +213,11 @@ module.exports = {
     try {
       await redisClient.del(GAME_KEY);
       await redisClient.del(LEADERBOARD_KEY);
+
+      // Clear leaderboard cache
+      cachedLeaderboardData = [];
+      leaderboardCacheTimestamp = 0;
+
       this.gameState = {
         round: 0,
         status: "question",

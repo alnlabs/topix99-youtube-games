@@ -18,7 +18,7 @@ class LuckyWheelGame {
   }
 
   _clearAllTimeouts() {
-    this.timeouts.forEach(timeout => clearTimeout(timeout));
+    this.timeouts.forEach((timeout) => clearTimeout(timeout));
     this.timeouts.clear();
   }
 
@@ -39,7 +39,9 @@ class LuckyWheelGame {
 
     // Generate unique random numbers for wheel
     while (wheelNumbers.length < SLICES) {
-      const num = Math.floor(Math.random() * (C.MAX_NUMBER - C.MIN_NUMBER + 1)) + C.MIN_NUMBER;
+      const num =
+        Math.floor(Math.random() * (C.MAX_NUMBER - C.MIN_NUMBER + 1)) +
+        C.MIN_NUMBER;
       if (!wheelNumbers.includes(num)) {
         wheelNumbers.push(num);
       }
@@ -57,11 +59,17 @@ class LuckyWheelGame {
     state.gameState.currentNumber = null; // Unknown yet
     state.gameState.timerEnd = Date.now() + C.WAITING_DURATION;
     // Clear celebration for new round
-    state.gameState.celebration = { active: false, username: null, startTime: 0 };
+    state.gameState.celebration = {
+      active: false,
+      username: null,
+      startTime: 0,
+    };
 
     try {
       await state.save();
-      logger.info(`[game] Round ${state.gameState.round} started - waiting for guesses`);
+      logger.info(
+        `[game] Round ${state.gameState.round} started - waiting for guesses`
+      );
       this._setTimeout(() => this.goToSpinning(), C.WAITING_DURATION);
     } catch (err) {
       logger.error(`[game] Failed to save waiting state: ${err.message}`);
@@ -97,14 +105,20 @@ class LuckyWheelGame {
       // But we're called after 7000ms, so it should be set. Add retry just in case.
       let retries = 0;
       while (!state.gameState.currentNumber && retries < 5) {
-        logger.warn(`[game] currentNumber not set yet, waiting... (retry ${retries + 1}/5)`);
-        await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+        logger.warn(
+          `[game] currentNumber not set yet, waiting... (retry ${
+            retries + 1
+          }/5)`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100)); // Wait 100ms
         await state.load(); // Reload state
         retries++;
       }
 
       if (!state.gameState.currentNumber) {
-        logger.error(`[game] currentNumber still not set after ${retries} retries, cannot calculate winners`);
+        logger.error(
+          `[game] currentNumber still not set after ${retries} retries, cannot calculate winners`
+        );
         state.gameState.status = "cooldown";
         await state.save();
         this._setTimeout(() => this.goToCooldown(), 1000);
@@ -119,12 +133,19 @@ class LuckyWheelGame {
       const winners = state.gameState.winners;
 
       // Debug logging
-      logger.info(`[game] Winner calculation: target=${state.gameState.currentNumber}, participants=${state.gameState.participants.size}, winners found=${winners.length}`);
+      logger.info(
+        `[game] Winner calculation: target=${state.gameState.currentNumber}, participants=${state.gameState.participants.size}, winners found=${winners.length}`
+      );
       if (state.gameState.participants.size > 0) {
-        const participantList = Array.from(state.gameState.participants.entries()).map(([id, p]) =>
-          `${p.username}(${id}): guesses=[${(p.guesses || [p.guess]).join(',')}]`
+        const participantList = Array.from(
+          state.gameState.participants.entries()
+        ).map(
+          ([id, p]) =>
+            `${p.username}(${id}): guesses=[${(p.guesses || [p.guess]).join(
+              ","
+            )}]`
         );
-        logger.debug(`[game] Participants: ${participantList.join('; ')}`);
+        logger.debug(`[game] Participants: ${participantList.join("; ")}`);
       }
 
       if (winners.length > 0) {
@@ -138,17 +159,28 @@ class LuckyWheelGame {
           score = C.BASE_SCORE_SINGLE_GUESS;
         } else {
           // Multiple guesses = base score divided by guess count (minimum 1 point)
-          score = Math.max(1, Math.floor(C.BASE_SCORE_MULTIPLE_GUESSES / guessCount));
+          score = Math.max(
+            1,
+            Math.floor(C.BASE_SCORE_MULTIPLE_GUESSES / guessCount)
+          );
         }
 
-        logger.info(`[game] Winner: ${w.username} (guess: ${w.guess}, actual: ${state.gameState.currentNumber}, guesses: ${guessCount}, score: ${score})`);
+        logger.info(
+          `[game] Winner: ${w.username} (guess: ${w.guess}, actual: ${state.gameState.currentNumber}, guesses: ${guessCount}, score: ${score})`
+        );
         await state.addWin(w.userId || w.username, w.username, score);
         // Trigger celebration only if there's a winner
         await state.triggerCelebration(w.username);
       } else {
-        logger.info(`[game] No winners this round (winning number: ${state.gameState.currentNumber})`);
+        logger.info(
+          `[game] No winners this round (winning number: ${state.gameState.currentNumber})`
+        );
         // Clear celebration if no winner
-        state.gameState.celebration = { active: false, username: null, startTime: 0 };
+        state.gameState.celebration = {
+          active: false,
+          username: null,
+          startTime: 0,
+        };
       }
 
       await state.save();
@@ -195,7 +227,10 @@ class LuckyWheelGame {
     }
 
     // Validate guess is on the wheel
-    if (!state.gameState.wheelValues || !state.gameState.wheelValues.includes(guess)) {
+    if (
+      !state.gameState.wheelValues ||
+      !state.gameState.wheelValues.includes(guess)
+    ) {
       return;
     }
 
@@ -206,32 +241,43 @@ class LuckyWheelGame {
 
       if (existingParticipant) {
         // User already has guesses - add this new one to the list
-        const guesses = existingParticipant.guesses || [existingParticipant.guess]; // Support old format
+        const guesses = existingParticipant.guesses || [
+          existingParticipant.guess,
+        ]; // Support old format
         guesses.push(guess);
 
         // Keep only the last MAX_GUESSES_PER_USER guesses (slice to last 5)
         const maxGuesses = C.MAX_GUESSES_PER_USER;
-        const trimmedGuesses = guesses.length > maxGuesses
-          ? guesses.slice(-maxGuesses) // Keep only last 5
-          : guesses;
+        const trimmedGuesses =
+          guesses.length > maxGuesses
+            ? guesses.slice(-maxGuesses) // Keep only last 5
+            : guesses;
         const guessCount = trimmedGuesses.length;
 
         state.gameState.participants.set(userId, {
           username: username || "Anonymous",
           guess: guess, // Keep latest guess for backward compatibility
           guesses: trimmedGuesses, // Store all guesses (max 5)
-          guessCount: guessCount
+          guessCount: guessCount,
         });
-        logger.debug(`[game] User ${username} (${userId}) submitted guess #${guesses.length}: ${guess} (keeping last ${guessCount} guesses: ${trimmedGuesses.join(', ')})`);
+        logger.debug(
+          `[game] User ${username} (${userId}) submitted guess #${
+            guesses.length
+          }: ${guess} (keeping last ${guessCount} guesses: ${trimmedGuesses.join(
+            ", "
+          )})`
+        );
       } else {
         // First guess from this user
         state.gameState.participants.set(userId, {
           username: username || "Anonymous",
           guess: guess, // Keep for backward compatibility
           guesses: [guess], // Store all guesses in array
-          guessCount: 1
+          guessCount: 1,
         });
-        logger.debug(`[game] User ${username} (${userId}) submitted first guess: ${guess}`);
+        logger.debug(
+          `[game] User ${username} (${userId}) submitted first guess: ${guess}`
+        );
       }
       await state.save();
     } catch (err) {

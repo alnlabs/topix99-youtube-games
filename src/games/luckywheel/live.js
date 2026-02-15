@@ -2,34 +2,19 @@
  * Lucky Wheel Game - YouTube Live Streaming
  *
  * This module uses the YouTubeStreamer library to stream the Lucky Wheel game to YouTube Live.
- * It demonstrates how to integrate the streaming library with a game.
+ * Uses the showdown-layout template for UI rendering.
  */
 
-const { loadImage } = require("canvas");
 const path = require("path");
 const { YouTubeStreamer } = require("../../core");
+const template = require("../../templates/showdown-layout");
 const {
   WIDTH,
   HEIGHT,
   FPS,
-  palettes,
-  drawBackground,
-  drawWheelAndUI,
-  drawLeaderboard,
-  drawFPSCounter,
-  drawLogoAndBrand,
-  WheelRotationState,
-  LeaderboardAnimationState,
-} = require("./renderer");
+  renderLuckyWheelUI,
+} = require("./template-renderer");
 const { logger } = require("../../services");
-
-// Game-specific state (not synced via library)
-let logoImage = null;
-let fpsState = { currentFPS: 0, lastFrameTime: Date.now() };
-let wheelRotationState = new WheelRotationState();
-let leaderboardAnimationState = new LeaderboardAnimationState();
-
-const currentPalette = palettes[0];
 
 /**
  * Start streaming the Lucky Wheel game to YouTube Live
@@ -38,67 +23,46 @@ const currentPalette = palettes[0];
  * @returns {Promise<YouTubeStreamer>} - The streamer instance
  */
 async function startLive(rtmpUrl, game) {
-  // Load logo image
-  try {
-    // Assets folder is at root level, so go up 3 levels from src/games/luckywheel/live.js
-    const assetsPath = path.join(__dirname, "../../../assets");
-    logoImage = await loadImage(
-      path.join(assetsPath, "images/logo.png")
-    );
-  } catch (e) {
-    logger.warn("⚠️ Logo not found");
-  }
-
-  // Track previous leaderboard for animation
-  let previousLeaderboard = [];
-
   // Create streamer instance
   const streamer = new YouTubeStreamer({
     rtmpUrl,
     width: WIDTH,
     height: HEIGHT,
     fps: FPS,
+
     bgmPath: path.join(__dirname, "../../../assets/sounds/bgm.mp3"),
+
+    // 🔥 Optimized FFmpeg settings for seamless streaming
+    ffmpegOptions: {
+      preset: "veryfast", // Balance quality and performance
+      tune: "zerolatency", // Optimize for live streaming
+      videoBitrate: "4200k", // Increased for better quality
+      maxBitrate: "4200k", // Consistent bitrate
+      bufsize: "8400k", // Buffer size for stable streaming
+      gop: "60", // GOP size (2 seconds at 30fps)
+      audioBitrate: "128k", // Audio bitrate
+    },
+
     syncState: async () => {
       // Sync game state from Redis
       await game.load();
-      const state = game.getStateSync();
-      const lb = game.getLeaderboardSync();
 
-      // Update animation states
-      if (lb && Array.isArray(lb)) {
-        const leaderboard = lb.map((p) => ({
-          username: p.username || "Unknown",
-          wins: p.score || 0,
-        }));
-        leaderboardAnimationState.update(previousLeaderboard, leaderboard);
-        previousLeaderboard = leaderboard;
-        return {
-          gameState: state || {},
-          leaderboard: leaderboard,
-        };
-      }
+      const gameState = game.getStateSync();
+      const leaderboard = game.getLeaderboardSync();
 
       return {
-        gameState: state || {},
-        leaderboard: previousLeaderboard,
+        gameState: gameState || {},
+        leaderboard: leaderboard || [],
       };
     },
+
     syncInterval: 500,
+
     renderFrame: (ctx, state) => {
-      // Extract state
       const gameState = state.gameState || {};
       const leaderboard = state.leaderboard || [];
 
-      // Update wheel rotation state
-      wheelRotationState.update(gameState);
-
-      // Render game
-      drawBackground(ctx, currentPalette);
-      drawWheelAndUI(ctx, gameState, wheelRotationState);
-      drawLeaderboard(ctx, leaderboard, leaderboardAnimationState);
-      drawLogoAndBrand(ctx, logoImage);
-      fpsState = drawFPSCounter(ctx, fpsState);
+      renderLuckyWheelUI(ctx, gameState, leaderboard);
     },
   });
 
