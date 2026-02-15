@@ -42,8 +42,8 @@ const TYPOGRAPHY = {
   // 1080p Scaled font sizes
   SIZE_LARGE: 81,
   SIZE_TITLE: 63,
-  SIZE_SUBTITLE: 48,
-  SIZE_BODY: 36,
+  SIZE_SUBTITLE: 42,
+  SIZE_BODY: 30,
   SIZE_SMALL: 24,
 };
 
@@ -57,7 +57,7 @@ const LAYOUT = {
 
   SAFE_MARGINS: {
     top: 40,
-    bottom: 100,
+    bottom: 350,
     left: 40,
     right: 40,
   },
