@@ -42,7 +42,7 @@ const TYPOGRAPHY = {
   // 1080p Scaled font sizes
   SIZE_LARGE: 81,
   SIZE_TITLE: 63,
-  SIZE_SUBTITLE: 42,
+  SIZE_SUBTITLE: 36,
   SIZE_BODY: 30,
   SIZE_SMALL: 24,
 };
