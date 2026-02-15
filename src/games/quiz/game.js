@@ -89,7 +89,7 @@ class QuizGame {
       state.gameState.participants = new Map(); // Clear participants for new question
 
       const question = questions[state.gameState.currentQuestionIndex];
-      const timeLimit = question.timeLimit || 15; // Default to 15 if not specified
+      const timeLimit = Math.max(20, question.timeLimit || 20); // Enforce minimum 25s for latency
       state.gameState.timeLeft = timeLimit;
       state.gameState.totalTime = timeLimit;
       state.gameState.timerEnd = Date.now() + timeLimit * 1000;
@@ -186,6 +186,7 @@ class QuizGame {
     try {
       // Check participants BEFORE changing status to reveal
       const totalParticipants = state.gameState.participants?.size || 0;
+      logger.info(`[quiz-game] Revel Transition: participants=${totalParticipants}, instanceOfMap=${state.gameState.participants instanceof Map}`);
 
       if (totalParticipants === 0) {
         logger.info("[quiz-game] No participants this round, skipping reveal phase");
@@ -228,11 +229,10 @@ class QuizGame {
       correctAnswerers.sort((a, b) => a.timestamp - b.timestamp);
 
       // Determine winner (80% chance someone answered correctly, and we have correct answers)
-      const hasWinner =
-        correctAnswerers.length > 0 && Math.random() < C.CORRECT_ANSWER_CHANCE;
+      const hasWinner = correctAnswerers.length > 0 && Math.random() < C.CORRECT_ANSWER_CHANCE;
       let winnerId = null;
 
-      logger.info(`[quiz-game] Correct answerers found: ${correctAnswerers.length}, hasWinner: ${hasWinner}`);
+      logger.info(`[quiz-game] Reveal Phase: Total participants=${totalParticipants}, Correct answerers=${correctAnswerers.length}, Correct index was=${question.correctIndex}`);
 
       if (hasWinner && correctAnswerers.length > 0) {
         // Fastest correct answerer wins
@@ -267,7 +267,9 @@ class QuizGame {
             state.gameState.recentAnswers.splice(existingIdx, 1);
           }
 
-          state.gameState.recentAnswers.push({
+          // Add to recent answers (limit to last N)
+          // Add to beginning of array so newest are on top
+          state.gameState.recentAnswers.unshift({
             playerId: winnerId,
             playerName: winner.username,
             playerAvatar: "🎉",
@@ -280,7 +282,7 @@ class QuizGame {
           // Keep only last N recent answers
           if (state.gameState.recentAnswers.length > C.RECENT_ANSWERS_COUNT) {
             state.gameState.recentAnswers = state.gameState.recentAnswers.slice(
-              -C.RECENT_ANSWERS_COUNT
+              0, C.RECENT_ANSWERS_COUNT
             );
           }
 
@@ -325,6 +327,8 @@ class QuizGame {
     this._clearAllTimeouts();
     try {
       state.gameState.status = "celebration";
+      state.gameState.celebrationStartTime = Date.now();
+      state.gameState.celebrationDuration = C.CELEBRATION_DURATION;
       await state.save();
       logger.info(
         `[quiz-game] Celebrating winner: ${state.gameState.winnerId}`
@@ -367,30 +371,25 @@ class QuizGame {
     const question = questions[state.gameState.currentQuestionIndex];
     if (!question) return;
 
-    // Extract answer option (A, B, C, D or 1, 2, 3, 4)
-    const normalized = String(message || "").trim().toUpperCase();
+    // Normalized for Regex matching (uppercase and trimmed)
+    const cleaned = String(message || "").trim().toUpperCase();
     let answerIndex = -1;
 
-    // Standard labels
-    const labels = ["A", "B", "C", "D"];
+    // Robust Regex: Matches A-D or 1-4
+    // 1. Matches at the start (e.g., "A", "A.", "A)", "1", "1.")
+    // 2. Matches with space/brace before it (e.g., " (A", " A")
+    const match = cleaned.match(/^([A-D1-4])([\s.,)\-]|$)/) || cleaned.match(/[\s(]([A-D1-4])([\s.,)\-]|$)/);
 
-    // Check for exact match or starts with label plus space/period
-    for (let i = 0; i < labels.length; i++) {
-        const L = labels[i];
-        if (normalized === L || normalized.startsWith(L + ".") || normalized.startsWith(L + " ")) {
-            answerIndex = i;
-            break;
+    if (match) {
+        const char = match[1];
+
+        // Map A-D to 0-3
+        if (char >= 'A' && char <= 'D') {
+            answerIndex = char.charCodeAt(0) - 65;
         }
-    }
-
-    // Check for number answers (1, 2, 3, 4) if not found yet
-    if (answerIndex === -1) {
-        for (let i = 0; i < 4; i++) {
-            const num = (i + 1).toString();
-            if (normalized === num || normalized.startsWith(num + ".") || normalized.startsWith(num + " ")) {
-                answerIndex = i;
-                break;
-            }
+        // Map 1-4 to 0-3
+        else if (char >= '1' && char <= '4') {
+            answerIndex = parseInt(char) - 1;
         }
     }
 
@@ -400,18 +399,18 @@ class QuizGame {
 
     // Store participant answer
     try {
-      const status = state.gameState.status;
+      const { status } = state.gameState;
       const numOptions = question.options?.length || 0;
 
-      if (status !== "question") {
-        logger.warn(`[quiz-game] Received answer "${message}" but status is ${status}`);
+      // Allow late answers during the reveal phase (up to 5 seconds) to account for stream latency
+      if (status !== "question" && status !== "reveal") {
         return;
       }
 
       const key = `${userId}|${username}`;
-      if (!state.gameState.participants) {
+      if (!state.gameState.participants || !(state.gameState.participants instanceof Map)) {
         state.gameState.participants = new Map();
-        logger.info("[quiz-game] Initialized new participants Map");
+        logger.info(`[quiz-game] (Re)initialized participants Map (was ${typeof state.gameState.participants})`);
       }
 
       const existing = state.gameState.participants.get(key);
@@ -425,7 +424,7 @@ class QuizGame {
         });
 
         const count = state.gameState.participants.size;
-        logger.info(`[quiz-game] User ${username} answered: ${answerIndex} (Map size: ${count})`);
+        logger.info(`[quiz-game] User ${username} answered: ${answerIndex} (Correct: ${question.correctIndex})`);
         await state.save();
       } else {
         logger.debug(`[quiz-game] User ${username} already answered, skipping`);

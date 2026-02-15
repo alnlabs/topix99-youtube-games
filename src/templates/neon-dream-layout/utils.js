@@ -4,6 +4,33 @@
 
 const { COLORS } = require("./design-system");
 
+// Robust polyfill for roundRect to ensure maximum compatibility with node-canvas
+try {
+    const { CanvasRenderingContext2D } = require('canvas');
+    if (CanvasRenderingContext2D && !CanvasRenderingContext2D.prototype.roundRect) {
+        CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, radius) {
+            if (radius === undefined || radius === null) radius = 0;
+            if (radius === 0) {
+                this.rect(x, y, w, h);
+                return this;
+            }
+            if (Array.isArray(radius)) radius = radius[0] || 0;
+            if (w < 2 * radius) radius = w / 2;
+            if (h < 2 * radius) radius = h / 2;
+            this.moveTo(x + radius, y);
+            this.arcTo(x + w, y, x + w, y + h, radius);
+            this.arcTo(x + w, y + h, x, y + h, radius);
+            this.arcTo(x, y + h, x, y, radius);
+            this.arcTo(x, y, x + w, y, radius);
+            this.closePath();
+            return this;
+        };
+        console.log("[utils] Applied roundRect polyfill to CanvasRenderingContext2D");
+    }
+} catch (e) {
+    // If canvas isn't available here, it should be fine as long as ui-components handles it
+}
+
 /**
  * Text Measurement Cache
  */
@@ -84,12 +111,21 @@ function drawNeonRect(ctx, x, y, w, h, radius, borderCol, fillCol, glowSize = 10
     ctx.fill();
   }
 
+  // Shadow removed for performance
+  /*
+  if (glowSize > 0) {
+    ctx.shadowBlur = glowSize;
+    ctx.shadowColor = borderCol;
+  }
+  */
+
   ctx.strokeStyle = borderCol;
   ctx.lineWidth = 2;
   ctx.stroke();
 
   ctx.restore();
 }
+
 
 /**
  * Draw wrapped text with auto-scaling (Optimized)
@@ -279,6 +315,28 @@ function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "l
 }
 
 const easeOutQuad = (t) => t * (2 - t);
+
+/**
+ * Polyfill for roundRect
+ */
+function roundRect(ctx, x, y, w, h, radius) {
+  if (ctx.roundRect) {
+    ctx.roundRect(x, y, w, h, radius);
+  } else {
+    if (radius === 0) {
+      ctx.rect(x, y, w, h);
+    } else {
+      if (w < 2 * radius) radius = w / 2;
+      if (h < 2 * radius) radius = h / 2;
+      ctx.moveTo(x + radius, y);
+      ctx.arcTo(x + w, y, x + w, y + h, radius);
+      ctx.arcTo(x + w, y + h, x, y + h, radius);
+      ctx.arcTo(x, y + h, x, y, radius);
+      ctx.arcTo(x, y, x + w, y, radius);
+      ctx.closePath();
+    }
+  }
+}
 
 module.exports = {
   hslToRgb,

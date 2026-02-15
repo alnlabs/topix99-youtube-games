@@ -3,24 +3,39 @@
 const { redisClient } = require("../../services");
 const C = require("./constants");
 
-// Leaderboard cache with TTL (5 seconds)
+// Leaderboard cache with TTL (1 second)
 let cachedLeaderboardData = [];
 let leaderboardCacheTimestamp = 0;
-const LEADERBOARD_CACHE_TTL = 5000; // 5 seconds
+const LEADERBOARD_CACHE_TTL = 1000; // 1 second
 
 // Determine if we're in test mode or live mode
 const IS_TEST_MODE = process.env.TEST_MODE === "true";
-const GAME_KEY = IS_TEST_MODE ? "game:quiz:test" : "game:quiz";
-const LEADERBOARD_KEY = IS_TEST_MODE
-  ? "leaderboard:quiz:test"
-  : "leaderboard:quiz";
+const DATA_MODE = process.env.DATA_MODE || "default";
+
+// Base key prefixes
+const baseGameKey = "game:quiz";
+const baseLeaderboardKey = "leaderboard:quiz";
+const baseNamesKey = "names:quiz";
+
+// Construct keys with suffixes
+let GAME_KEY, LEADERBOARD_KEY, NAMES_KEY;
 
 if (IS_TEST_MODE) {
-  console.log(`[quiz-state] Running in TEST mode`);
-  console.log(
-    `[quiz-state] Using Redis keys: GAME_KEY="${GAME_KEY}", LEADERBOARD_KEY="${LEADERBOARD_KEY}"`
-  );
+  GAME_KEY = `${baseGameKey}:test`;
+  LEADERBOARD_KEY = `${baseLeaderboardKey}:test`;
+  NAMES_KEY = `${baseNamesKey}:test`;
+} else if (DATA_MODE && DATA_MODE !== "default") {
+  GAME_KEY = `${baseGameKey}:${DATA_MODE}`;
+  LEADERBOARD_KEY = `${baseLeaderboardKey}:${DATA_MODE}`;
+  NAMES_KEY = `${baseNamesKey}:${DATA_MODE}`;
+} else {
+  GAME_KEY = baseGameKey;
+  LEADERBOARD_KEY = baseLeaderboardKey;
+  NAMES_KEY = baseNamesKey;
 }
+
+console.log(`[quiz-state] Mode: IS_TEST_MODE=${IS_TEST_MODE}, DATA_MODE="${DATA_MODE}"`);
+console.log(`[quiz-state] Using Redis keys: GAME_KEY="${GAME_KEY}", LEADERBOARD_KEY="${LEADERBOARD_KEY}", NAMES_KEY="${NAMES_KEY}"`);
 
 module.exports = {
   gameState: {
@@ -112,7 +127,7 @@ module.exports = {
       const now = Date.now();
       let lbData;
 
-      if (now - leaderboardCacheTimestamp < LEADERBOARD_CACHE_TTL) {
+      if (now - leaderboardCacheTimestamp < LEADERBOARD_CACHE_TTL && cachedLeaderboardData.length > 0) {
         // Use cached data
         lbData = cachedLeaderboardData;
       } else {
@@ -120,7 +135,7 @@ module.exports = {
         lbData = await redisClient.zRangeWithScores(
           LEADERBOARD_KEY,
           0,
-          C.TOP_PLAYERS_COUNT - 1,
+          C.TOP_PLAYERS_COUNT * 2,
           {
             REV: true,
           }
@@ -176,16 +191,24 @@ module.exports = {
       );
       this.gameState.winnerUsername = data.winnerUsername || "";
 
-      // Update cached leaderboard
-      this.cachedLeaderboard = lbData.map((e) => {
-        const value = e.value;
-        if (value.includes("|")) {
-          const [userId, username] = value.split("|");
-          return { username, score: e.score, userId };
-        } else {
-          return { username: value, score: e.score, userId: value };
-        }
-      });
+      // Update cached leaderboard with original names from Redis Hash
+      const leaderboardWithNames = [];
+      const userIds = lbData.map(e => e.value);
+
+      if (userIds.length > 0) {
+        const originalNames = await redisClient.hmGet(NAMES_KEY, userIds);
+        lbData.forEach((e, i) => {
+           if (leaderboardWithNames.length >= C.TOP_PLAYERS_COUNT) return;
+           const userId = e.value;
+           const originalName = originalNames[i];
+           leaderboardWithNames.push({
+             username: originalName || userId,
+             score: e.score,
+             userId
+           });
+        });
+      }
+      this.cachedLeaderboard = leaderboardWithNames;
     } catch (err) {
       console.error("[quiz-state] Redis Load Error:", err.message);
       throw err;
@@ -194,8 +217,13 @@ module.exports = {
 
   async addScore(userId, username, points) {
     try {
-      // Use lowercase username as the unique key to prevent duplicates
-      const leaderboardKey = (username || userId).toLowerCase().trim();
+      // Use userId (already lowercase from server.js) as the unique key in Sorted Set
+      const leaderboardKey = userId;
+
+      // Store original case username in Hash
+      if (username) {
+        await redisClient.hSet(NAMES_KEY, userId, username);
+      }
       const newScore = await redisClient.zIncrBy(LEADERBOARD_KEY, points, leaderboardKey);
 
       // Invalidate leaderboard cache since scores have changed
@@ -213,6 +241,7 @@ module.exports = {
     try {
       await redisClient.del(GAME_KEY);
       await redisClient.del(LEADERBOARD_KEY);
+      await redisClient.del(NAMES_KEY);
 
       // Clear leaderboard cache
       cachedLeaderboardData = [];
