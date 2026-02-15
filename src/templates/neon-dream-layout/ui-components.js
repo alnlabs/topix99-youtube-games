@@ -169,7 +169,7 @@ const Button = {
     const font = `500 ${TYPOGRAPHY.SIZE_BODY}px ${TYPOGRAPHY.FONT_DISPLAY}`;
     const textColor = COLORS.FOREGROUND;
 
-    drawMultilingualText(ctx, label, textX, py - 20, textW, font, textColor, "left", true);
+    drawMultilingualText(ctx, label, textX, y, textW, font, textColor, "left", true, h, "middle");
 
     // Icons
     if (status === "correct") {

@@ -87,7 +87,7 @@ function drawNeonRect(ctx, x, y, w, h, radius, borderCol, fillCol, glowSize = 10
 /**
  * Draw wrapped text
  */
-function drawWrappedText(ctx, text, x, y, maxWidth, font, color, align = "left") {
+function drawWrappedText(ctx, text, x, y, maxWidth, font, color, align = "left", containerHeight = 0, vAlign = "top") {
   ctx.save();
   ctx.font = font;
   ctx.fillStyle = color;
@@ -112,21 +112,33 @@ function drawWrappedText(ctx, text, x, y, maxWidth, font, color, align = "left")
   }
   lines.push(currentLine);
 
-  const lineHeight = parseInt(font.match(/\d+/)?.[0] || "16") * 1.3;
+  const fontSize = parseInt(font.match(/\d+/)?.[0] || "16");
+  const lineHeight = fontSize * 1.3;
+  const totalTextHeight = lines.length * lineHeight;
+
+  let startY = y;
+  if (containerHeight > 0) {
+    if (vAlign === "middle") {
+      startY = y + (containerHeight - totalTextHeight) / 2;
+    } else if (vAlign === "bottom") {
+      startY = y + containerHeight - totalTextHeight;
+    }
+  }
+
   lines.forEach((line, index) => {
-    ctx.fillText(line, x, y + index * lineHeight);
+    ctx.fillText(line, x, startY + index * lineHeight);
   });
 
   ctx.restore();
-  return lines.length * lineHeight;
+  return totalTextHeight;
 }
 
 /**
  * Draw multilingual text
  */
-function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "left", joinLines = false) {
+function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "left", joinLines = false, containerHeight = 0, vAlign = "top") {
   if (typeof text === "string") {
-    return drawWrappedText(ctx, text, x, y, maxWidth, font, color, align);
+    return drawWrappedText(ctx, text, x, y, maxWidth, font, color, align, containerHeight, vAlign);
   }
 
   const languages = [];
@@ -150,10 +162,9 @@ function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "l
   const fontSize = parseInt(font.match(/\d+/)?.[0] || "16");
   const lineHeight = fontSize * 1.3;
   const languageSpacing = fontSize * 0.3;
-  let currentY = y;
 
-  languages.forEach((lang, idx) => {
-    if (idx > 0) currentY += languageSpacing;
+  // Pre-calculate all lines to get total height
+  const languagesWithLines = languages.map(lang => {
     const words = lang.text.split(" ");
     const lines = [];
     let curLine = words[0];
@@ -169,7 +180,25 @@ function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "l
       }
     }
     lines.push(curLine);
+    return lines;
+  });
 
+  const totalHeight = languagesWithLines.reduce((acc, lines, idx) => {
+    return acc + (lines.length * lineHeight) + (idx > 0 ? languageSpacing : 0);
+  }, 0);
+
+  let startY = y;
+  if (containerHeight > 0) {
+    if (vAlign === "middle") {
+      startY = y + (containerHeight - totalHeight) / 2;
+    } else if (vAlign === "bottom") {
+      startY = y + containerHeight - totalHeight;
+    }
+  }
+
+  let currentY = startY;
+  languagesWithLines.forEach((lines, idx) => {
+    if (idx > 0) currentY += languageSpacing;
     lines.forEach((line, lIdx) => {
       ctx.fillText(line, x, currentY + lIdx * lineHeight);
     });
@@ -177,7 +206,7 @@ function drawMultilingualText(ctx, text, x, y, maxWidth, font, color, align = "l
   });
 
   ctx.restore();
-  return currentY - y;
+  return totalHeight;
 }
 
 const easeOutQuad = (t) => t * (2 - t);
