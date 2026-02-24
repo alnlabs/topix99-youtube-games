@@ -30,7 +30,8 @@ const modes = {
 
   quiz: {
     port: 4002,
-    topicId: 119,
+    topicId: 122,
+    streamName: "General Knowledge Quiz",
     orientation: "portrait",
     fps: 30,
     safeMargins: {
@@ -41,6 +42,7 @@ const modes = {
     },
     contentOffsetTop: 120,
   },
+
 };
 
 module.exports = modes;

@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quiz Stream Admin</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --card: #121a2f;
+      --line: #273451;
+      --text: #edf2ff;
+      --muted: #9fb0d1;
+      --accent: #2dd4bf;
+      --accent2: #60a5fa;
+      --danger: #f87171;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: radial-gradient(circle at 20% 0%, #1b2644, var(--bg));
+      color: var(--text);
+    }
+
+    .wrap {
+      max-width: 920px;
+      margin: 20px auto;
+      padding: 0 16px 28px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, #111a30, var(--card));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .row3 {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 13px;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input,
+    select,
+    button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 11px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #0b1430;
+      color: var(--text);
+    }
+
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, #23c9a9, #0f766e);
+      border: 0;
+      font-weight: 600;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn2 {
+      background: linear-gradient(180deg, #60a5fa, #2563eb);
+    }
+
+    .btnGhost {
+      background: #15213d;
+      border: 1px solid var(--line);
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .steps {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status {
+      margin-top: 12px;
+      border: 1px solid #1f406a;
+      background: #0f1f3d;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      color: var(--accent2);
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 8px;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    .k {
+      color: var(--muted);
+    }
+
+    .v {
+      word-break: break-word;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #16325f;
+      color: #bfdbfe;
+    }
+
+    .danger {
+      color: var(--danger);
+    }
+
+    .ytlink {
+      margin-top: 10px;
+      font-size: 13px;
+    }
+
+    .ytlink a {
+      color: #93c5fd;
+    }
+
+    @media (max-width: 768px) {
+
+      .row,
+      .row3 {
+        grid-template-columns: 1fr;
+      }
+
+      .kv {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Quiz Stream Admin</h1>
+      <div class="muted">Switch stream without changing code or PM2 config.</div>
+      <ol class="steps">
+        <li>Click <b>Load All Topics</b> and pick a topic.</li>
+        <li>Select the stream you want.</li>
+        <li>Click <b>Start / Switch Stream</b>.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>Step 1: Topic</h2>
+      <div class="row">
+        <div>
+          <label for="topicSelect">Topic list</label>
+          <select id="topicSelect"></select>
+        </div>
+        <div>
+          <button id="loadTopicsBtn" class="btn2">Load All Topics</button>
+        </div>
+      </div>
+      <div class="row3" style="margin-top:10px;">
+        <div>
+          <label for="topicId">Selected Topic ID</label>
+          <input id="topicId" type="number" min="1" placeholder="Auto-filled from topic list" />
+        </div>
+        <div>
+          <button id="loadBtn" class="btn2">Load Streams</button>
+        </div>
+        <div>
+          <button id="refreshBtn" class="btnGhost">Refresh Status</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Step 2: Stream</h2>
+      <div class="row">
+        <div>
+          <label for="streamSelect">Available streams in this topic</label>
+          <select id="streamSelect"></select>
+        </div>
+        <div>
+          <label for="rtmpOverride">Optional RTMP URL Override</label>
+          <input id="rtmpOverride" type="text" placeholder="Leave empty to use stream RTMP from API" />
+        </div>
+      </div>
+
+      <div class="kv" id="streamDetails">
+        <div class="k">Selected stream</div>
+        <div class="v" id="dName">-</div>
+        <div class="k">Broadcast ID</div>
+        <div class="v" id="dBroadcast">-</div>
+        <div class="k">Live Chat ID</div>
+        <div class="v" id="dChat">-</div>
+        <div class="k">RTMP URL</div>
+        <div class="v" id="dRtmp">-</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Step 3: Go Live</h2>
+      <div class="row3">
+        <div class="muted">
+          This restarts output with the selected topic + stream immediately.
+        </div>
+        <div></div>
+        <div>
+          <button id="applyBtn">Start / Switch Stream</button>
+        </div>
+      </div>
+      <div id="status" class="status">Ready</div>
+    </div>
+
+    <div class="card">
+      <div class="muted">Current runtime config <span class="pill">live</span></div>
+      <pre id="runtime" style="white-space:pre-wrap"></pre>
+      <div class="ytlink" id="ytLinkWrap"></div>
+    </div>
+
+    <div class="card">
+      <div class="muted" style="margin-bottom: 8px;">Current running streams</div>
+      <div id="runningStreamsContainer"></div>
+    </div>
+  </div>
+
+  <script>
+    const topicIdEl = document.getElementById("topicId");
+    const topicSelectEl = document.getElementById("topicSelect");
+    const streamSelectEl = document.getElementById("streamSelect");
+    const rtmpOverrideEl = document.getElementById("rtmpOverride");
+    const statusEl = document.getElementById("status");
+    const runtimeEl = document.getElementById("runtime");
+    const ytLinkWrapEl = document.getElementById("ytLinkWrap");
+    const runningStreamsContainerEl = document.getElementById("runningStreamsContainer");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const loadTopicsBtn = document.getElementById("loadTopicsBtn");
+    const detailsEls = {
+      name: document.getElementById("dName"),
+      broadcastId: document.getElementById("dBroadcast"),
+      liveChatId: document.getElementById("dChat"),
+      rtmpUrl: document.getElementById("dRtmp"),
+    };
+    let lastStreams = [];
+    let lastTopics = [];
+
+    function setStatus(text, isError = false) {
+      statusEl.textContent = text;
+      statusEl.style.color = isError ? "#f87171" : "#60a5fa";
+    }
+
+    function getSelectedStream() {
+      const selectedName = streamSelectEl.value;
+      return lastStreams.find((s) => s.name === selectedName) || null;
+    }
+
+    function renderSelectedStreamDetails() {
+      const s = getSelectedStream();
+      detailsEls.name.textContent = s?.name || "-";
+      detailsEls.broadcastId.textContent = s?.broadcastId || "-";
+      detailsEls.liveChatId.textContent = s?.liveChatId || "-";
+      detailsEls.rtmpUrl.textContent = s?.rtmpUrl || "-";
+    }
+
+    async function refreshConfig() {
+      const res = await fetch("/api/admin/config");
+      const data = await res.json();
+      runtimeEl.textContent = JSON.stringify(data, null, 2);
+      const broadcastId = data?.running?.broadcastId || null;
+      if (broadcastId) {
+        const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(broadcastId)}`;
+        ytLinkWrapEl.innerHTML = `YouTube Link: <a href="${watchUrl}" target="_blank" rel="noopener noreferrer">${watchUrl}</a>`;
+      } else {
+        ytLinkWrapEl.textContent = "YouTube Link: Not available";
+      }
+      if (!topicIdEl.value && data?.runtime?.topicId) {
+        topicIdEl.value = data.runtime.topicId;
+      }
+    }
+
+    async function refreshRunningStreams() {
+      const res = await fetch("/api/admin/running-streams");
+      const data = await res.json();
+      const container = document.getElementById("runningStreamsContainer");
+      container.innerHTML = "";
+
+      if (!data.streams || data.streams.length === 0) {
+        container.innerHTML = '<div class="muted">No streams running.</div>';
+        return;
+      }
+
+      data.streams.forEach((stream) => {
+        const isRunning = stream.status === "running" || stream.status === "switching";
+
+        const card = document.createElement("div");
+        card.style.background = "#0f1f3d";
+        card.style.border = "1px solid #1f406a";
+        card.style.padding = "12px";
+        card.style.borderRadius = "8px";
+        card.style.marginBottom = "8px";
+        card.style.display = "flex";
+        card.style.justifyContent = "space-between";
+        card.style.alignItems = "center";
+
+        const info = document.createElement("div");
+        info.innerHTML = `<strong>Topic ID: ${stream.topicId || "N/A"}</strong>
+                            <div style="font-size: 13px; color: var(--muted); margin-top: 4px;">
+                              Status: <span style="color: ${isRunning ? '#2dd4bf' : '#f87171'}">${stream.status || "N/A"}</span><br>
+                              Stream Name: ${stream.streamName || "N/A"}<br>
+                              RTMP: ${stream.rtmpUrl ? stream.rtmpUrl.substring(0, 30) + "..." : "N/A"}<br>
+                              Broadcast ID: ${stream.broadcastId || "N/A"}
+                            </div>`;
+        card.appendChild(info);
+
+        if (isRunning) {
+          const actionsWrap = document.createElement("div");
+          actionsWrap.style.display = "flex";
+          actionsWrap.style.gap = "8px";
+
+          if (stream.broadcastId) {
+            const watchBtn = document.createElement("button");
+            watchBtn.className = "btn2";
+            watchBtn.style.width = "auto";
+            watchBtn.style.padding = "6px 12px";
+            watchBtn.textContent = "Watch in YouTube";
+            watchBtn.onclick = () => {
+              window.open(`https://www.youtube.com/watch?v=${encodeURIComponent(stream.broadcastId)}`, '_blank');
+            };
+            actionsWrap.appendChild(watchBtn);
+          }
+
+          const btn = document.createElement("button");
+          btn.className = "danger";
+          btn.style.width = "auto";
+          btn.style.padding = "6px 12px";
+          btn.textContent = "Stop Stream";
+          btn.onclick = stopStream;
+
+          actionsWrap.appendChild(btn);
+          card.appendChild(actionsWrap);
+        }
+
+        container.appendChild(card);
+      });
+    }
+
+    function renderTopics() {
+      topicSelectEl.innerHTML = "";
+      if (!lastTopics.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No topics loaded";
+        topicSelectEl.appendChild(opt);
+        return;
+      }
+
+      lastTopics.forEach((topic) => {
+        const opt = document.createElement("option");
+        opt.value = String(topic.id);
+        opt.textContent = `${topic.name} (${topic.id})`;
+        topicSelectEl.appendChild(opt);
+      });
+
+      const selectedId = Number(topicIdEl.value);
+      const hasMatch = selectedId && lastTopics.some((t) => Number(t.id) === selectedId);
+      if (hasMatch) {
+        topicSelectEl.value = String(selectedId);
+      } else {
+        topicSelectEl.selectedIndex = 0;
+        topicIdEl.value = topicSelectEl.value;
+      }
+    }
+
+    async function loadTopics() {
+      setStatus("Loading topics...");
+      const res = await fetch("/api/admin/topics");
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Failed to load topics", true);
+        return;
+      }
+      lastTopics = data.topics || [];
+      renderTopics();
+      setStatus(`Loaded ${lastTopics.length} topic(s)`);
+    }
+
+    async function loadStreams() {
+      const topicId = topicIdEl.value.trim();
+      if (!topicId) {
+        setStatus("Enter topic ID first", true);
+        return;
+      }
+      setStatus("Loading streams...");
+      const res = await fetch(`/api/admin/topics/${encodeURIComponent(topicId)}/streams`);
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Failed to load streams", true);
+        return;
+      }
+      lastStreams = data.streams || [];
+      streamSelectEl.innerHTML = "";
+      if (!lastStreams.length) {
+        setStatus(`No streams found for topic ${topicId}`, true);
+        renderSelectedStreamDetails();
+        return;
+      }
+      lastStreams.forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = s.name;
+        opt.textContent = s.name;
+        opt.dataset.rtmpUrl = s.rtmpUrl || "";
+        opt.dataset.broadcastId = s.broadcastId || "";
+        opt.dataset.liveChatId = s.liveChatId || "";
+        streamSelectEl.appendChild(opt);
+      });
+      renderSelectedStreamDetails();
+      setStatus(`Loaded ${lastStreams.length} stream(s) for topic ${topicId}`);
+    }
+
+    async function applyStream() {
+      const topicId = Number(topicIdEl.value);
+      const selectedStream = getSelectedStream();
+      const streamName = streamSelectEl.value || null;
+      const rtmpUrlOverride = rtmpOverrideEl.value.trim() || null;
+      if (!topicId) {
+        setStatus("Invalid topic ID", true);
+        return;
+      }
+      if (!selectedStream) {
+        setStatus("Select a stream first", true);
+        return;
+      }
+      setStatus("Switching stream...");
+      const res = await fetch("/api/admin/stream/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topicId,
+          streamName,
+          rtmpUrl: selectedStream.rtmpUrl || null,
+          broadcastId: selectedStream.broadcastId || null,
+          liveChatId: selectedStream.liveChatId || null,
+          rtmpUrlOverride,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Failed to switch stream", true);
+        return;
+      }
+      setStatus("Stream switched successfully");
+      await refreshConfig();
+      await refreshRunningStreams();
+    }
+
+    async function stopStream() {
+      if (!confirm("Are you sure you want to stop the current stream?")) {
+        return;
+      }
+      setStatus("Stopping stream...");
+      try {
+        const res = await fetch("/api/admin/stream/stop", {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setStatus(data.error || "Failed to stop stream", true);
+          return;
+        }
+        setStatus("Stream stopped successfully");
+        await refreshConfig();
+        await refreshRunningStreams();
+      } catch (err) {
+        setStatus("Error stopping stream: " + err.message, true);
+      }
+    }
+
+    document.getElementById("loadBtn").addEventListener("click", loadStreams);
+    document.getElementById("applyBtn").addEventListener("click", applyStream);
+    loadTopicsBtn.addEventListener("click", loadTopics);
+    streamSelectEl.addEventListener("change", renderSelectedStreamDetails);
+    topicSelectEl.addEventListener("change", () => {
+      if (topicSelectEl.value) {
+        topicIdEl.value = topicSelectEl.value;
+      }
+    });
+    refreshBtn.addEventListener("click", () => {
+      Promise.all([refreshConfig(), refreshRunningStreams()])
+        .then(() => setStatus("Runtime status refreshed"));
+    });
+
+    Promise.all([refreshConfig(), refreshRunningStreams()])
+      .then(() => loadTopics())
+      .catch((err) => setStatus(err.message, true));
+  </script>
+</body>
+
+</html>

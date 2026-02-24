@@ -8,6 +8,7 @@
     "start": "node server.js",
     "default": "cross-env MODE=default node server.js",
     "dev": "cross-env MODE=default nodemon server.js",
+<<<<<<< Updated upstream
     "game:luckywheel": "cross-env MODE=luckywheel node server.js",
     "game:luckywheel:test": "cross-env MODE=luckywheel TEST_MODE=true node src/games/luckywheel/test.js",
     "game:quiz": "cross-env TEST_MODE=false MODE=quiz node server.js",
@@ -37,6 +38,19 @@
     "pm2:logs:luckywheel:test": "pm2 logs topix99-luckywheel-test",
     "pm2:logs:quiz": "pm2 logs topix99-quiz",
     "pm2:logs:quiz:test": "pm2 logs topix99-quiz-test",
+=======
+    "game": "node scripts/game.js",
+    "game:help": "node scripts/game.js --help",
+    "quiz": "node scripts/game.js --name=quiz",
+    "quiz:test": "node scripts/game.js --name=quiz --test",
+    "pm2": "node scripts/pm2.js",
+    "pm2:help": "node scripts/pm2.js --help",
+    "pm2:start": "node scripts/pm2.js start",
+    "pm2:stop": "node scripts/pm2.js stop",
+    "pm2:restart": "node scripts/pm2.js restart",
+    "pm2:delete": "node scripts/pm2.js delete",
+    "pm2:logs": "node scripts/pm2.js logs",
+>>>>>>> Stashed changes
     "pm2:status": "pm2 status",
     "pm2:save": "pm2 save",
     "pm2:startup": "pm2 startup",
@@ -55,7 +69,7 @@
     "cross-env": "^7.0.3",
     "dotenv": "^17.3.1",
     "nodemon": "^3.0.3",
-    "pm2": "^5.3.0"
+    "pm2": "^5.4.3"
   },
   "engines": {
     "node": ">=18"

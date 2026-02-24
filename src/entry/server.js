@@ -8,8 +8,19 @@ require("dotenv").config({ path: ".env" });
  */
 
 const express = require("express");
+const path = require("path");
 const { gameRegistry } = require("../core");
-const { logger, connectRedis, disconnectRedis, getTopicStream, YTChat, validateConfig, validateModeConfig } = require("../services");
+const {
+  logger,
+  connectRedis,
+  disconnectRedis,
+  getTopics,
+  getTopicStream,
+  getTopicStreams,
+  YTChat,
+  validateConfig,
+  validateModeConfig,
+} = require("../services");
 
 // Register games
 const luckywheel = require("../games/luckywheel");
@@ -44,7 +55,7 @@ console.log("MODE:", process.env.MODE);
 console.log("API:", process.env.TOPIX99_API_TOKEN);
 
 const { mode: MODE, modeConfig } = config;
-const PORT = modeConfig.port;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : modeConfig.port;
 const TOPIC_ID = modeConfig.topicId;
 
 // Ensure TEST_MODE is NOT set for live/production server
@@ -76,10 +87,134 @@ if (!isPM2 && !process.env.ALLOW_NON_PM2) {
 logger.info(`Starting server - Mode=${MODE}, Port=${PORT}, Topic=${TOPIC_ID}, TEST_MODE=${process.env.TEST_MODE || "false"}, PM2=${isPM2}`);
 
 const app = express();
+app.use(express.json());
+app.use(express.static("public"));
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "admin.html"));
+});
+
 let streamer = null;
 let ytChat = null;
 let server = null;
 let game = null;
+let streamSwitchInProgress = false;
+let currentStreamState = {
+  status: "idle",
+  topicId: TOPIC_ID,
+  streamName: modeConfig.streamName || null,
+  broadcastId: null,
+  rtmpUrl: null,
+  usingOverride: Boolean(process.env.RTMP_URL_OVERRIDE),
+  startedAt: null,
+  updatedAt: new Date().toISOString(),
+};
+const streamRuntimeConfig = {
+  topicId: TOPIC_ID,
+  streamName: modeConfig.streamName || null,
+  rtmpUrlOverride: process.env.RTMP_URL_OVERRIDE || null,
+};
+
+function getActiveStreamConfig() {
+  return {
+    topicId: streamRuntimeConfig.topicId,
+    streamName: streamRuntimeConfig.streamName,
+    rtmpUrlOverride: streamRuntimeConfig.rtmpUrlOverride,
+  };
+}
+
+async function startOrRestartStreamingOutput(target) {
+  const gameConfig = gameRegistry.get(MODE);
+  if (!gameConfig) {
+    throw new Error(`Game '${MODE}' is not registered`);
+  }
+  if (!game) {
+    throw new Error("Game instance not initialized");
+  }
+
+  const topicId = target.topicId;
+  const streamName = target.streamName || null;
+  const overrideRtmp = target.rtmpUrlOverride || null;
+  const directRtmpUrl = target.rtmpUrl || null;
+  const directBroadcastId = target.broadcastId || null;
+  const directLiveChatId = target.liveChatId || null;
+
+  let rtmpUrl = null;
+  let broadcastId = null;
+  let liveChatId = null;
+
+  if (directRtmpUrl && directBroadcastId) {
+    logger.info(`Using direct stream payload from admin for topic ${topicId}`);
+    rtmpUrl = overrideRtmp || directRtmpUrl;
+    broadcastId = directBroadcastId;
+    liveChatId = directLiveChatId;
+  } else {
+    logger.info(`Fetching stream from Topix99 (topic ${topicId})...`);
+    const fromApi = await getTopicStream(topicId, streamName);
+    rtmpUrl = overrideRtmp || fromApi.rtmpUrl;
+    broadcastId = fromApi.broadcastId;
+    liveChatId = fromApi.liveChatId || null;
+  }
+
+  if (!rtmpUrl || !broadcastId) {
+    throw new Error("Invalid stream data from Topix99 - missing rtmpUrl or broadcastId");
+  }
+
+  if (ytChat) {
+    try {
+      await ytChat.stop();
+      logger.info("YouTube chat stopped");
+    } catch (err) {
+      logger.error(`Error stopping chat: ${err.message}`);
+    }
+    ytChat = null;
+  }
+
+  if (streamer && typeof streamer.stop === "function") {
+    try {
+      await streamer.stop();
+      logger.info("Previous stream output stopped");
+    } catch (err) {
+      logger.error(`Error stopping previous stream output: ${err.message}`);
+    }
+    streamer = null;
+  }
+
+  logger.info(
+    overrideRtmp
+      ? "RTMP URL: using runtime override from admin"
+      : `RTMP URL: ${rtmpUrl.substring(0, 50)}...`
+  );
+  logger.info(`Broadcast ID: ${broadcastId}`);
+
+  streamer = await gameConfig.startLive(rtmpUrl, game);
+  logger.info("Video pipeline started");
+  currentStreamState = {
+    status: "running",
+    topicId,
+    streamName: streamName || null,
+    broadcastId: broadcastId || null,
+    rtmpUrl: rtmpUrl || null,
+    liveChatId: liveChatId || null,
+    usingOverride: Boolean(overrideRtmp),
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  ytChat = new YTChat(broadcastId);
+  await ytChat.start(async ({ author, message }) => {
+    logger.info(`[server-chat] Received from ${author}: "${message}"`);
+    if (game && typeof game.processChatMessage === "function") {
+      try {
+        const normalizedUsername = author.replace(/^@+/, "").trim();
+        const userId = normalizedUsername.toLowerCase();
+        await game.processChatMessage(userId, normalizedUsername, message);
+      } catch (err) {
+        logger.error(`Error processing chat message: ${err.message}`);
+      }
+    }
+  });
+  logger.info("YouTube chat monitoring started");
+}
 
 async function boot() {
   try {
@@ -106,19 +241,7 @@ async function boot() {
       logger.info("Live database cleaned - all game data and leaderboard reset");
     }
 
-    logger.info("Fetching stream from Topix99...");
-    const { rtmpUrl, broadcastId } = await getTopicStream(TOPIC_ID);
-
-    if (!rtmpUrl || !broadcastId) {
-      throw new Error("Invalid stream data from Topix99 - missing rtmpUrl or broadcastId");
-    }
-
-    logger.info(`RTMP URL: ${rtmpUrl.substring(0, 50)}...`);
-    logger.info(`Broadcast ID: ${broadcastId}`);
-
-    // Start video pipeline using game's startLive function
-    streamer = await gameConfig.startLive(rtmpUrl, game);
-    logger.info("Video pipeline started");
+    await startOrRestartStreamingOutput(getActiveStreamConfig());
 
     // Start game
     if (game && typeof game.startNewRound === "function") {
@@ -126,25 +249,6 @@ async function boot() {
       logger.info(`${gameConfig.config.name || MODE} game started`);
     }
 
-    // Start chat
-    ytChat = new YTChat(broadcastId);
-    await ytChat.start(async ({ author, message }) => {
-      logger.info(`[server-chat] Received from ${author}: "${message}"`);
-
-      if (game && typeof game.processChatMessage === "function") {
-        try {
-          // Normalize username: remove @ symbol and trim whitespace
-          const normalizedUsername = author.replace(/^@+/, "").trim();
-          // Use normalized username as userId for consistency
-          const userId = normalizedUsername.toLowerCase();
-
-          await game.processChatMessage(userId, normalizedUsername, message);
-        } catch (err) {
-          logger.error(`Error processing chat message: ${err.message}`);
-        }
-      }
-    });
-    logger.info("YouTube chat monitoring started");
   } catch (err) {
     logger.error(`Boot failed: ${err.message}`);
     logger.error(err.stack);
@@ -218,9 +322,169 @@ app.get("/health", (req, res) => {
   });
 });
 
+app.get("/api/admin/config", (req, res) => {
+  res.json({
+    mode: MODE,
+    runtime: getActiveStreamConfig(),
+    running: currentStreamState,
+  });
+});
+
+app.get("/api/admin/running-streams", (req, res) => {
+  res.json({
+    mode: MODE,
+    streams: [currentStreamState],
+  });
+});
+
+app.get("/api/admin/topics/:topicId/streams", async (req, res) => {
+  try {
+    const topicId = parseInt(req.params.topicId, 10);
+    if (!Number.isFinite(topicId) || topicId <= 0) {
+      return res.status(400).json({ error: "Invalid topicId" });
+    }
+    const streams = await getTopicStreams(topicId);
+    return res.json({
+      topicId,
+      streams: streams.map((s) => ({
+        id: s.id,
+        name: s.name,
+        rtmpUrl: s.rtmpUrl,
+        broadcastId: s.broadcastId,
+        liveChatId: s.liveChatId || null,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/admin/topics", async (req, res) => {
+  try {
+    const topics = await getTopics();
+    return res.json({
+      topics: topics.map((topic) => ({
+        id: topic.id,
+        name: topic.name,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/stream/select", async (req, res) => {
+  if (streamSwitchInProgress) {
+    return res.status(409).json({ error: "Stream switch already in progress" });
+  }
+  const topicId = parseInt(req.body.topicId, 10);
+  const streamName = req.body.streamName ? String(req.body.streamName).trim() : null;
+  const directRtmpUrl = req.body.rtmpUrl ? String(req.body.rtmpUrl).trim() : null;
+  const directBroadcastId = req.body.broadcastId ? String(req.body.broadcastId).trim() : null;
+  const directLiveChatId = req.body.liveChatId ? String(req.body.liveChatId).trim() : null;
+  const rtmpUrlOverride = req.body.rtmpUrlOverride
+    ? String(req.body.rtmpUrlOverride).trim()
+    : null;
+
+  if (!Number.isFinite(topicId) || topicId <= 0) {
+    return res.status(400).json({ error: "Invalid topicId" });
+  }
+
+  streamSwitchInProgress = true;
+  try {
+    currentStreamState = {
+      ...currentStreamState,
+      status: "switching",
+      topicId,
+      streamName,
+      rtmpUrl: directRtmpUrl || null,
+      broadcastId: directBroadcastId || null,
+      liveChatId: directLiveChatId || null,
+      usingOverride: Boolean(rtmpUrlOverride),
+      updatedAt: new Date().toISOString(),
+    };
+    streamRuntimeConfig.topicId = topicId;
+    streamRuntimeConfig.streamName = streamName;
+    streamRuntimeConfig.rtmpUrlOverride = rtmpUrlOverride;
+
+    await startOrRestartStreamingOutput({
+      ...getActiveStreamConfig(),
+      rtmpUrl: directRtmpUrl,
+      broadcastId: directBroadcastId,
+      liveChatId: directLiveChatId,
+    });
+    return res.json({
+      ok: true,
+      runtime: getActiveStreamConfig(),
+    });
+  } catch (err) {
+    currentStreamState = {
+      ...currentStreamState,
+      status: "error",
+      updatedAt: new Date().toISOString(),
+      lastError: err.message,
+    };
+    return res.status(500).json({ error: err.message });
+  } finally {
+    streamSwitchInProgress = false;
+  }
+});
+
+app.post("/api/admin/stream/stop", async (req, res) => {
+  if (streamSwitchInProgress) {
+    return res.status(409).json({ error: "Stream switch already in progress" });
+  }
+
+  streamSwitchInProgress = true;
+  try {
+    if (ytChat) {
+      await ytChat.stop();
+      logger.info("YouTube chat stopped via admin stop request");
+      ytChat = null;
+    }
+
+    if (streamer && typeof streamer.stop === "function") {
+      await streamer.stop();
+      logger.info("Stream output stopped via admin stop request");
+      streamer = null;
+    }
+
+    currentStreamState = {
+      ...currentStreamState,
+      status: "stopped",
+      topicId: null,
+      streamName: null,
+      rtmpUrl: null,
+      broadcastId: null,
+      liveChatId: null,
+      usingOverride: false,
+      updatedAt: new Date().toISOString(),
+    };
+    streamRuntimeConfig.topicId = null;
+    streamRuntimeConfig.streamName = null;
+    streamRuntimeConfig.rtmpUrlOverride = null;
+
+    return res.json({
+      ok: true,
+      runtime: getActiveStreamConfig(),
+    });
+  } catch (err) {
+    logger.error(`Error stopping stream: ${err.message}`);
+    return res.status(500).json({ error: err.message });
+  } finally {
+    streamSwitchInProgress = false;
+  }
+});
+
 // Start server
 server = app.listen(PORT, async () => {
   logger.info(`Server listening on port ${PORT}`);
+
+  if (process.env.ADMIN_ONLY === "true") {
+    logger.info("🛠️  Running in ADMIN ONLY mode. Skipping game boot sequence.");
+    return;
+  }
+
   try {
     console.log("[SERVER] Starting boot sequence...");
     await boot();

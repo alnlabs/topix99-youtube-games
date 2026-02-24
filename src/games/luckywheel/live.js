@@ -32,15 +32,17 @@ async function startLive(rtmpUrl, game) {
 
     bgmPath: path.join(__dirname, "../../../assets/sounds/bgm.mp3"),
 
-    // 🔥 Optimized FFmpeg settings for seamless streaming
+    // Network-safe encoding profile for unstable uplinks.
     ffmpegOptions: {
-      preset: "veryfast", // Balance quality and performance
-      tune: "zerolatency", // Optimize for live streaming
-      videoBitrate: "4200k", // Increased for better quality
-      maxBitrate: "4200k", // Consistent bitrate
-      bufsize: "8400k", // Buffer size for stable streaming
+      videoEncoder: "libx264",
+      preset: "veryfast",
+      tune: "zerolatency",
+      videoBitrate: process.env.STREAM_VIDEO_BITRATE || "3500k",
+      maxBitrate: process.env.STREAM_MAX_BITRATE || "3500k",
+      bufsize: process.env.STREAM_BUFSIZE || "7000k",
       gop: "60", // GOP size (2 seconds at 30fps)
-      audioBitrate: "128k", // Audio bitrate
+      audioBitrate: process.env.STREAM_AUDIO_BITRATE || "128k",
+      rtmpBuffer: process.env.STREAM_RTMP_BUFFER || "1000",
     },
 
     syncState: async () => {

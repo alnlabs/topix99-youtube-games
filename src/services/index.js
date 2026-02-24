@@ -15,7 +15,9 @@ module.exports = {
   disconnectRedis: require("./redis").disconnectRedis,
 
   // Topix99 API
+  getTopics: require("./topix99-api").getTopics,
   getTopicStream: require("./topix99-api").getTopicStream,
+  getTopicStreams: require("./topix99-api").getTopicStreams,
 
   // YouTube Chat
   YTChat: require("./ytchat").YTChat,

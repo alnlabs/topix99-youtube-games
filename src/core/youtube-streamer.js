@@ -55,6 +55,9 @@ class YouTubeStreamer {
       syncState: config.syncState,
       syncInterval: config.syncInterval || 500,
       ffmpegOptions: config.ffmpegOptions || {},
+      autoRestart: config.autoRestart !== false,
+      restartBaseDelayMs: config.restartBaseDelayMs || 2000,
+      restartMaxDelayMs: config.restartMaxDelayMs || 30000,
     };
 
     // Internal state
@@ -71,6 +74,9 @@ class YouTubeStreamer {
     };
     this.frameCount = 0;
     this.lastLogTime = 0;
+    this.isStopping = false;
+    this.restartAttempts = 0;
+    this.restartTimer = null;
 
     // Bind methods
     this.stop = this.stop.bind(this);
@@ -90,6 +96,12 @@ class YouTubeStreamer {
     }
 
     try {
+      this.isStopping = false;
+      this.restartAttempts = 0;
+      if (this.restartTimer) {
+        clearTimeout(this.restartTimer);
+        this.restartTimer = null;
+      }
       // Initialize canvas
       this.canvas = createCanvas(this.config.width, this.config.height);
       this.ctx = this.canvas.getContext("2d");
@@ -128,7 +140,13 @@ class YouTubeStreamer {
     }
 
     logger.info("[streamer] Stopping YouTube stream...");
+    this.isStopping = true;
     this.isRunning = false;
+    this.restartAttempts = 0;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
 
     // Clear sync interval
     if (this.syncInterval) {
@@ -184,6 +202,8 @@ class YouTubeStreamer {
       "info",
 
       "-re", // Read input at native frame rate (crucial for real-time pipes)
+      "-fflags",
+      "+genpts",
 
       // ===== INPUT (Raw canvas frames) =====
       "-f",
@@ -193,6 +213,8 @@ class YouTubeStreamer {
       "-video_size",
       `${width}x${height}`,
       "-framerate",
+      `${fps}`,
+      "-r",
       `${fps}`,
       "-thread_queue_size",
       "512",
@@ -223,11 +245,11 @@ class YouTubeStreamer {
 
       // Stable bitrate for 1080p
       "-b:v",
-      this.config.ffmpegOptions.videoBitrate || "4200k",
+      this.config.ffmpegOptions.videoBitrate || "3500k",
       "-maxrate",
-      this.config.ffmpegOptions.maxBitrate || "4200k",
+      this.config.ffmpegOptions.maxBitrate || "3500k",
       "-bufsize",
-      this.config.ffmpegOptions.bufsize || "8400k",
+      this.config.ffmpegOptions.bufsize || "7000k",
 
       // Strict 2-second keyframe interval
       "-g",
@@ -236,12 +258,16 @@ class YouTubeStreamer {
       `${fps * 2}`,
       "-sc_threshold",
       "0",
+      "-x264-params",
+      `nal-hrd=cbr:force-cfr=1:scenecut=0:keyint=${fps * 2}:min-keyint=${fps * 2}`,
 
       // High profile for YouTube
       "-profile:v",
       "high",
       "-pix_fmt",
-      "yuv420p"
+      "yuv420p",
+      "-fps_mode",
+      "cfr"
     );
 
     // ===== AUDIO ENCODING =====
@@ -253,6 +279,8 @@ class YouTubeStreamer {
         this.config.ffmpegOptions.audioBitrate || "128k",
         "-ar",
         "44100",
+        "-ac",
+        "2",
         "-map",
         "0:v:0",
         "-map",
@@ -261,9 +289,20 @@ class YouTubeStreamer {
     }
 
     // ===== OUTPUT =====
-    ffmpegArgs.push("-f", "flv", "-rtmp_live", "live", this.config.rtmpUrl);
+    ffmpegArgs.push(
+      "-f",
+      "flv",
+      "-flvflags",
+      "no_duration_filesize",
+      "-rtmp_live",
+      "live",
+      "-rtmp_buffer",
+      this.config.ffmpegOptions.rtmpBuffer || "1000",
+      this.config.rtmpUrl
+    );
 
-    this.ffmpegInstance = spawn("ffmpeg", ffmpegArgs);
+    const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
+    this.ffmpegInstance = spawn(ffmpegPath, ffmpegArgs);
 
     this.ffmpegInstance.on("close", this._handleFFmpegClose);
     this.ffmpegInstance.on("error", this._handleFFmpegError);
@@ -385,6 +424,10 @@ class YouTubeStreamer {
               `[streamer] FFmpeg pipe error (${error.code}), stopping render loop`
             );
             this.ffmpegInstance = null;
+            if (!this.isStopping) {
+              this._scheduleRestart("pipe_error");
+              return;
+            }
             if (this.syncInterval) {
               clearInterval(this.syncInterval);
             }
@@ -408,6 +451,10 @@ class YouTubeStreamer {
           "[streamer] FFmpeg stdin not writable, stopping render loop"
         );
         this.ffmpegInstance = null;
+        if (!this.isStopping) {
+          this._scheduleRestart("stdin_not_writable");
+          return;
+        }
         if (this.syncInterval) {
           clearInterval(this.syncInterval);
         }
@@ -418,6 +465,10 @@ class YouTubeStreamer {
       logger.error(
         "[streamer] FFmpeg stdin not available, stopping render loop"
       );
+      if (!this.isStopping) {
+        this._scheduleRestart("stdin_unavailable");
+        return;
+      }
       if (this.syncInterval) {
         clearInterval(this.syncInterval);
       }
@@ -447,6 +498,10 @@ class YouTubeStreamer {
     }
 
     this.ffmpegInstance = null;
+    if (!this.isStopping) {
+      this._scheduleRestart("ffmpeg_close");
+      return;
+    }
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
@@ -460,6 +515,10 @@ class YouTubeStreamer {
   _handleFFmpegError(error) {
     logger.error(`[streamer] FFmpeg error: ${error.message}`);
     this.ffmpegInstance = null;
+    if (!this.isStopping) {
+      this._scheduleRestart("ffmpeg_error");
+      return;
+    }
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
@@ -482,10 +541,49 @@ class YouTubeStreamer {
       );
     }
     this.ffmpegInstance = null;
+    if (!this.isStopping) {
+      this._scheduleRestart("stdin_error");
+      return;
+    }
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
     this.isRunning = false;
+  }
+
+  _scheduleRestart(reason) {
+    if (!this.config.autoRestart || !this.isRunning || this.isStopping) {
+      return;
+    }
+    if (this.restartTimer) {
+      return;
+    }
+
+    this.restartAttempts += 1;
+    const delay = Math.min(
+      this.config.restartBaseDelayMs * Math.pow(2, this.restartAttempts - 1),
+      this.config.restartMaxDelayMs
+    );
+    logger.warn(
+      `[streamer] FFmpeg interrupted (${reason}). Restarting in ${Math.round(
+        delay / 1000
+      )}s (attempt ${this.restartAttempts})`
+    );
+
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (!this.isRunning || this.isStopping) {
+        return;
+      }
+      try {
+        this._startFFmpeg();
+        // Render loop may have exited while ffmpeg was down.
+        this._render();
+      } catch (error) {
+        logger.error(`[streamer] FFmpeg restart failed: ${error.message}`);
+        this._scheduleRestart("restart_failed");
+      }
+    }, delay);
   }
 }
 
